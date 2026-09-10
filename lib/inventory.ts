@@ -602,6 +602,23 @@ export function rateSalaryForCatalog(
 }
 
 /**
+ * QUTI (box) KATALOGI — backend 10.09.2026 (euroflowers_box_catalog_frontend.md).
+ *
+ * Oddiy (standart) katalogda `arrangement_type=box` tanlansa qoidalar BOSHQACHA:
+ *  • `volume` MAJBURIY EMAS — quti uchun S/M/L tarifi yo'q;
+ *  • florist tanlansa `florist_salary_amount` MAJBURIY va HAR SAFAR QO'LDA kiritiladi;
+ *  • `composition[].quantity_stems` HAR BIR QATOR uchun majburiy;
+ *  • shogirt tanlansa oylik yozilmaydi (kunlik davomat haqi alohida yuradi).
+ * Buket/savat qoidalari o'zgarmadi: hajm tanlanadi, haq hajm tarifidan olinadi va
+ * frontend yuborgan `florist_salary_amount` backend tomonidan e'tiborga olinmaydi.
+ */
+export const isBoxCatalog = (arrangement: ArrangementType | "" | null | undefined): boolean => arrangement === "box";
+
+/** Backend xatosining aynan mazmuni — operator 400 ni kashf qilmasin (klientda to'xtatamiz). */
+export const BOX_SALARY_REQUIRED = "Quti uchun floristga beriladigan pulni kiriting — hajm tarifi qo'llanilmaydi";
+export const BOX_STEMS_REQUIRED = "Quti katalogida har bir gulning soni majburiy — gul to'g'ridan-to'g'ri skladdan yechiladi";
+
+/**
  * STANDART katalog + florist + hajm tanlangan bo'lsa HAJM TARIFI MAJBURIY.
  * Backend 400 beradi (KATALOG_TAHRIR_MATERIAL_VA_CHIQIM §3):
  *   { "volume": ["<Florist> uchun bu hajm tarifi belgilanmagan. Avval floristga hajm narxini kiriting."] }
@@ -619,7 +636,9 @@ export const catalogRateMissing = (
   arrangement: ArrangementType | "" | null | undefined,
   rates: FloristVolumeRate[] | null | undefined,
 ): boolean =>
-  kind === "standard" && !!florist && !!volume && !rateSalaryForCatalog(rates, florist, volume, arrangement);
+  // ⚠️ QUTI (box) — hajm tarifi UMUMAN yo'q (tarif enum'i faqat buket/savat), haq QO'LDA
+  //    kiritiladi (euroflowers_box_catalog_frontend.md 10.09.2026) → hech qachon bloklanmaydi.
+  kind === "standard" && !isBoxCatalog(arrangement) && !!florist && !!volume && !rateSalaryForCatalog(rates, florist, volume, arrangement);
 
 /**
  * KATALOG FORMASI REJIMI — §8/§9 (backend 20.08.2026) qoidalari YAGONA joyda.
@@ -638,14 +657,21 @@ export const catalogFlowRules = (
   kind: CatalogKind,
   florist: number | null | undefined,
   branch: number | null | undefined,
-): { floristIssueMode: boolean; volumeRequired: boolean; stemsRequired: boolean; salaryEditable: boolean } => {
+  arrangement?: ArrangementType | "" | null,
+): { floristIssueMode: boolean; volumeRequired: boolean; stemsRequired: boolean; salaryEditable: boolean; salaryRequired: boolean } => {
   const floristMode = (florist ?? 0) > 0;
   const branchMode = (branch ?? 0) > 0;
+  const boxMode = isBoxCatalog(arrangement);
   return {
-    floristIssueMode: floristMode && kind === "standard",
-    volumeRequired: kind === "standard" || floristMode,
-    stemsRequired: kind === "custom" || branchMode,
-    salaryEditable: kind === "custom",
+    // QUTI florist-balans oqimiga TUSHMAYDI — backend har bir qator uchun soni talab qiladi,
+    // florist oqimida esa son chiqim yopilganda yoziladi (0 yuboriladi) → 400.
+    floristIssueMode: floristMode && kind === "standard" && !boxMode,
+    volumeRequired: !boxMode && (kind === "standard" || floristMode),
+    stemsRequired: boxMode || kind === "custom" || branchMode,
+    salaryEditable: boxMode || kind === "custom",
+    // Backend: {"florist_salary_amount": ["Quti uchun floristga beriladigan pulni kiriting"]}
+    // ⚠️ SHOGIRT bundan mustasno (kunlik davomat haqi) — chaqiruvchi `isApprentice` bilan kesadi.
+    salaryRequired: boxMode && floristMode,
   };
 };
 

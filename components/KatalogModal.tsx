@@ -16,7 +16,7 @@ import ImageInput from "./ImageInput";
 import { Icon } from "./icons";
 import { ARRANGEMENT_LABEL } from "./badges";
 import { fmt } from "@/lib/format";
-import { KIND_LABEL, PACKAGING_LABEL, VOLUME_LABEL, stems as stemsFmt, formatStemsAndBunches, normalizeComposition, normalizeMaterials, rateSalaryForCatalog, catalogRateMissing, rateToCatalogSalary, catalogSalaryPayload, catalogFlowRules, ratesForFlorist, batchDeliveryTag, buildFloristComposition, catalogClosed } from "@/lib/inventory";
+import { KIND_LABEL, PACKAGING_LABEL, VOLUME_LABEL, stems as stemsFmt, formatStemsAndBunches, normalizeComposition, normalizeMaterials, rateSalaryForCatalog, catalogRateMissing, rateToCatalogSalary, catalogSalaryPayload, catalogFlowRules, isBoxCatalog, BOX_SALARY_REQUIRED, BOX_STEMS_REQUIRED, ratesForFlorist, batchDeliveryTag, buildFloristComposition, catalogClosed } from "@/lib/inventory";
 import { usableInCatalog } from "@/lib/materialUnit";
 import FloristCompositionPicker from "./FloristCompositionPicker";
 import type { ArrangementType, Branch, CatalogItem, CatalogKind, CatalogVolume, FloristProfile, FloristVolumeRate, Packaging, StockBatch } from "@/lib/types";
@@ -157,7 +157,9 @@ export default function KatalogModal({ item = null, onClose, onSaved }: { item?:
   //    FAQAT STANDART katalogda qoladi.
   // ⚠️ Qoidalar YAGONA joyda (lib/inventory: catalogFlowRules) — Vitest bilan qamralgan:
   //    volumeRequired (§9 hajm majburiy), stemsRequired (§8 soni majburiy), floristIssueMode.
-  const { floristIssueMode, volumeRequired, stemsRequired } = catalogFlowRules(kind, florist, branch);
+  // ⚠️ QUTI (box) — 10.09.2026 backend: oddiy katalogda quti hajmsiz, haqi qo'lda, gul soni bilan.
+  const boxMode = isBoxCatalog(f.arrangement_type);
+  const { floristIssueMode, volumeRequired, stemsRequired, salaryRequired } = catalogFlowRules(kind, florist, branch, f.arrangement_type);
   // YOPILGAN florist katalogi (hamma qatorda soni > 0) — tarkib READ-ONLY (adjust bilan tuzatiladi).
   // Kutayotgan (soni 0) — gul o'zgartirilishi mumkin.
   const isFloristClosed = !!item && catalogClosed(item);
@@ -175,15 +177,17 @@ export default function KatalogModal({ item = null, onClose, onSaved }: { item?:
 
   // ⚠️ §8 — STANDART → MAXSUS almashtirilganda florist balansidan tanlangan gul(lar) YO'QOLMASIN:
   //    o'sha partiyalar sklad qatorlariga ko'chiriladi (soni bo'sh — operator kiritadi).
+  //    ⚠️ QUTI ham xuddi shunday: box tanlansa florist-balans oqimi o'chadi (backend soni talab
+  //    qiladi) — tanlangan partiyalar sklad qatorlariga ko'chiriladi.
   useEffect(() => {
-    if (kind !== "custom" || floristBatches.length === 0) return;
+    if (floristIssueMode || floristBatches.length === 0) return;
     setComp((rows) => {
       const filled = rows.filter((r) => r.stock_batch > 0 && (parseFloat(r.qty) || 0) > 0);
       const have = new Set(filled.map((r) => r.stock_batch));
       const added = floristBatches.filter((id) => id > 0 && !have.has(id)).map((id) => ({ stock_batch: id, mode: "stems" as const, qty: "" }));
       return added.length ? [...filled, ...added] : rows;
     });
-  }, [kind, floristBatches]);
+  }, [kind, floristBatches, floristIssueMode]);
 
   // ⚠️ Operator xatoni TUZATGACH qizil banner turib qolmasin: gul/material qatorlari
   //    o'zgarishi bilan tegishli xato darrov so'nadi (saqlashni kutmaymiz).
@@ -313,10 +317,16 @@ export default function KatalogModal({ item = null, onClose, onSaved }: { item?:
       setErrs((x) => { if (!x.volume && !x.florist_salary_amount) return x; const n = { ...x }; delete n.volume; delete n.florist_salary_amount; return n; });
       return;
     }
+    // ⚠️ QUTI — haq HAR SAFAR QO'LDA (spec: «Quti uchun florist haqi S/M/L tarifdan olinmaydi»).
+    //    Buketdan qutiga o'tilganda tarifdan tushgan summa JIMGINA qolib ketmasin — tozalanadi.
+    if (boxMode) {
+      setF((p) => (p.florist_salary_amount && !salaryTouched ? { ...p, florist_salary_amount: "" } : p));
+      return;
+    }
     if (salaryTouched) return;
     const rate = rateFor(volume, f.arrangement_type);
     setF((p) => ({ ...p, florist_salary_amount: rate ? rateToCatalogSalary(rate) : "" }));
-  }, [volume, f.arrangement_type, florist, rates, salaryTouched, isApprentice]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [volume, f.arrangement_type, florist, rates, salaryTouched, isApprentice, boxMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // «Tarifga qaytarish» — qo'lda yozilgandan keyin tarif qiymatini tiklaydi (auto-fill'ni qayta yoqadi).
   const reapplyRate = () => {
@@ -376,6 +386,12 @@ export default function KatalogModal({ item = null, onClose, onSaved }: { item?:
       setErrs((x) => ({ ...x, volume: `${who} uchun «${vol}» hajm tarifi belgilanmagan — avval tarifni kiriting` }));
       return showToast(`${who} uchun «${vol}» hajm tarifi yo'q`);
     }
+    // ⚠️ QUTI + florist — haq MAJBURIY (backend: {"florist_salary_amount": ["Quti uchun
+    //    floristga beriladigan pulni kiriting"]}). Shogirtda oylik yozilmaydi → tekshirilmaydi.
+    if (salaryRequired && !isApprentice && !(+f.florist_salary_amount > 0)) {
+      setErrs((x) => ({ ...x, florist_salary_amount: BOX_SALARY_REQUIRED }));
+      return showToast("Florist haqini kiriting");
+    }
     // §9 STANDART florist katalogi: gul MAJBURIY (kutayotgan/yangi holatda; yopilgan read-only). Soni EMAS.
     if (floristIssueMode && !isFloristClosed && floristBatches.filter((id) => id > 0).length === 0) {
       setErrs((x) => ({ ...x, composition: "Floristga chiqarilgan qaysi guldan yasalganini tanlang" }));
@@ -391,15 +407,17 @@ export default function KatalogModal({ item = null, onClose, onSaved }: { item?:
     if (stemsRequired && !compLocked && !comp.some((r) => r.stock_batch && stemsOfRow(r) > 0)) {
       setErrs((x) => ({
         ...x,
-        composition: kind === "custom"
-          ? "Maxsus katalogda gul va soni majburiy — gul to'g'ridan-to'g'ri skladdan yechiladi"
-          : "Filial katalogida gul va soni majburiy — qaysi guldan necha dona ketishini kiriting",
+        composition: boxMode
+          ? BOX_STEMS_REQUIRED
+          : kind === "custom"
+            ? "Maxsus katalogda gul va soni majburiy — gul to'g'ridan-to'g'ri skladdan yechiladi"
+            : "Filial katalogida gul va soni majburiy — qaysi guldan necha dona ketishini kiriting",
       }));
       return showToast("Gul sonini kiriting");
     }
     // ⚠️ Tanlangan, ammo SONI YO'Q qator jimgina tushib qolmasin — aniq aytamiz.
     if (stemsRequired && !compLocked && comp.some((r) => r.stock_batch > 0 && stemsOfRow(r) <= 0)) {
-      setErrs((x) => ({ ...x, composition: "Har bir tanlangan gulning sonini kiriting (0 emas)" }));
+      setErrs((x) => ({ ...x, composition: boxMode ? BOX_STEMS_REQUIRED : "Har bir tanlangan gulning sonini kiriting (0 emas)" }));
       return showToast("Gul sonini kiriting");
     }
     // NORMALLASHTIRISH: bir xil stock_batch/packaging qatorlari BITTAGA
@@ -614,7 +632,7 @@ export default function KatalogModal({ item = null, onClose, onSaved }: { item?:
         </div>
       )}
       <p className="mt-2 text-[12px]" style={{ color: "var(--muted)" }}>
-        {kind === "standard" ? "Standart — florist tayyorlagan buket/savat." : "Maxsus — mijoz do'konda o'zi tanladi."}
+        {kind === "standard" ? "Standart — florist tayyorlagan buket/savat/quti." : "Maxsus — mijoz do'konda o'zi tanladi."}
       </p>
       {/* ⚠️ TO'LOV TURI TANLOVI OLIB TASHLANDI: yozuv endi sotilmaydi, ya'ni
           bu yerda to'lovning ma'nosi yo'q — u SOTISH oynasida so'raladi. */}
@@ -630,13 +648,24 @@ export default function KatalogModal({ item = null, onClose, onSaved }: { item?:
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="Nomi (uz)" span><input className="inp" value={f.name_uz} onChange={set("name_uz")} placeholder="Masalan: Gortenziya savat" /><Err k="name_uz" /></Field>
         <Field label="Turi">
-          {/* ⚠️ FLORIST rejimida QUTI (box) YO'Q: tarif enum'i box'ni qabul qilmaydi (E15Enum
-              = bouquet/basket) → box florist katalogini YOPIB BO'LMAYDI. Warehouse'da uchtasi ham bor. */}
-          <Select value={f.arrangement_type} onChange={(v) => { const a = v as ArrangementType; setF((p) => ({ ...p, arrangement_type: a })); setErrs((x) => { const n = { ...x }; delete n.arrangement_type; return n; }); }} options={(floristIssueMode ? (["bouquet", "basket"] as const) : (["bouquet", "basket", "box"] as const)).map((t) => ({ value: t, label: ARRANGEMENT_LABEL[t] }))} />
+          {/* ⚠️ QUTI (box) — 10.09.2026 dan ODDIY katalogda ham bor. Tarif enum'i (E15Enum =
+              bouquet/basket) qutini qabul qilmaydi, shuning uchun quti florist-balans oqimiga
+              TUSHMAYDI: gul skladdan soni bilan yechiladi, haq esa qo'lda kiritiladi. */}
+          <Select value={f.arrangement_type} onChange={(v) => { const a = v as ArrangementType; setF((p) => ({ ...p, arrangement_type: a })); setErrs((x) => { const n = { ...x }; delete n.arrangement_type; delete n.volume; delete n.composition; return n; }); }} options={(["bouquet", "basket", "box"] as const).map((t) => ({ value: t, label: ARRANGEMENT_LABEL[t] }))} />
           <Err k="arrangement_type" />
+          {boxMode && florist > 0 && kind === "standard" && (
+            <span className="mt-1 block text-[11.5px] font-semibold" style={{ color: "var(--text-2)" }}>
+              Quti — gul <b>skladdan soni bilan</b> yechiladi, florist haqi <b>qo&apos;lda</b> kiritiladi.
+            </span>
+          )}
         </Field>
           <Field label={effectiveVolumeRequired ? "Hajm (majburiy)" : "Hajm"}>
           <Select value={volume} onChange={(v) => { const vol = v as CatalogVolume | ""; setVolume(vol); setErrs((x) => { const n = { ...x }; delete n.volume; return n; }); }} placeholder="Tanlang" options={[{ value: "", label: "—" }, ...(["small", "medium", "large"] as const).map((v) => ({ value: v, label: VOLUME_LABEL[v] }))]} />
+          {boxMode && (
+            <span className="mt-1 block text-[11.5px] font-medium" style={{ color: "var(--muted)" }}>
+              Quti uchun ixtiyoriy — hajm tarifi qo&apos;llanilmaydi (faqat hisobot uchun).
+            </span>
+          )}
           <Err k="volume" />
         </Field>
         {/* ⚠️ FILIAL rejimida FLORIST YO'Q — filial katalogi florist katalogi emas (chiqim yopish
@@ -822,6 +851,15 @@ export default function KatalogModal({ item = null, onClose, onSaved }: { item?:
       {/* ⚠️ §8 — MAXSUS katalogda florist tanlangan bo'lsa ham gul SKLADDAN yechiladi.
           Operator buni saqlashdan OLDIN bilishi shart: standart katalogda xuddi shu tanlov
           floristning balansidan yechilardi, custom'da esa balansga TEGILMAYDI. */}
+      {boxMode && kind === "standard" && floristMode && !compLocked && (
+        <div className="mb-2 flex items-start gap-1.5 rounded-[11px] px-3 py-2 text-[12px] font-semibold" style={{ background: "var(--primary-soft, var(--surface-2))", color: "var(--text-2)" }}>
+          <Info size={13} strokeWidth={2.2} className="mt-px shrink-0" style={{ color: "var(--primary)" }} />
+          <span>
+            Quti katalogi — gul <b>to&apos;g&apos;ridan-to&apos;g&apos;ri skladdan</b> yechiladi (florist balansidan emas).
+            Har bir gulning <b>soni majburiy</b>, florist haqi esa <b>qo&apos;lda</b> kiritiladi.
+          </span>
+        </div>
+      )}
       {kind === "custom" && floristMode && !compLocked && (
         <div className="mb-2 flex items-start gap-1.5 rounded-[11px] px-3 py-2 text-[12px] font-semibold" style={{ background: "var(--primary-soft, var(--surface-2))", color: "var(--text-2)" }}>
           <Info size={13} strokeWidth={2.2} className="mt-px shrink-0" style={{ color: "var(--primary)" }} />
@@ -994,8 +1032,8 @@ export default function KatalogModal({ item = null, onClose, onSaved }: { item?:
         {/* ⚠️ §3 FLORIST HAQI — STANDART: faqat KO'RSATILADI (hajm tarifidan; backend qo'lda kiritilganni
             qabul qilmaydi). CUSTOM: tahrirlanadi (ish hajmi oldindan noma'lum, operator kiritadi). */}
         {(kind === "custom" || florist > 0) && !isApprentice && (
-          <Field label={kind === "custom" ? "Florist ish haqi (oylikka)" : "Florist ish haqi (tarifdan)"}>
-            {kind === "custom" ? (
+          <Field label={boxMode ? "Florist ish haqi (qo'lda, majburiy)" : kind === "custom" ? "Florist ish haqi (oylikka)" : "Florist ish haqi (tarifdan)"}>
+            {kind === "custom" || boxMode ? (
               <input
                 className="inp"
                 type="number"
@@ -1017,6 +1055,9 @@ export default function KatalogModal({ item = null, onClose, onSaved }: { item?:
             <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] font-semibold">
               {!florist ? (
                 <span style={{ color: "var(--muted)" }}>Florist tanlanmagan — oylik yozilmaydi</span>
+              ) : boxMode ? (
+                /* ⚠️ QUTI — S/M/L tarifi YO'Q, summa har safar qo'lda yoziladi (backend shuni oladi). */
+                <span style={{ color: "var(--text-2)" }}>Quti — summa <b>qo&apos;lda</b> kiritiladi, hajm tarifi qo&apos;llanilmaydi.</span>
               ) : !volume ? (
                 <span style={{ color: "var(--muted)" }}>Hajmni tanlang — tarifdan olinadi</span>
               ) : !currentRate ? (
@@ -1047,7 +1088,12 @@ export default function KatalogModal({ item = null, onClose, onSaved }: { item?:
               )}
             </div>
             {/* ⚠️ §8 — CUSTOM'da summa BO'SH qoldirilsa backend hajm tarifidan oladi (yozilgan bo'lsa AYNAN shu ketadi). */}
-            {kind === "custom" && florist > 0 && f.florist_salary_amount === "" && (
+            {boxMode && florist > 0 && !(+f.florist_salary_amount > 0) && (
+              <span className="mt-0.5 block text-[11.5px] font-semibold" style={{ color: "var(--warning-ink, #8a6d1f)" }}>
+                Quti uchun bu summa <b>majburiy</b> — bo&apos;sh qoldirilsa katalog saqlanmaydi.
+              </span>
+            )}
+            {!boxMode && kind === "custom" && florist > 0 && f.florist_salary_amount === "" && (
               <span className="mt-0.5 block text-[11.5px] font-semibold" style={{ color: "var(--muted)" }}>
                 Bo&apos;sh qoldirilsa — server <b>hajm tarifidan</b> oladi (tarif bo&apos;lmasa oylik yozilmaydi).
               </span>

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { catalogFlowRules, normalizeComposition, catalogRateMissing, catalogSalaryPayload } from "./inventory";
+import { catalogFlowRules, normalizeComposition, catalogRateMissing, catalogSalaryPayload, isBoxCatalog } from "./inventory";
 
 // euroflowers_frontend_update.md §8 (custom inventory oqimi) va §9 (standard inventory oqimi).
 // ⚠️ ASOSIY QOIDA: custom katalog gulni TO'G'RIDAN-TO'G'RI stock_batch qoldig'idan yechadi —
@@ -78,5 +78,68 @@ describe("CF5 — §8: florist_salary_amount qo'lda berilsa AYNAN ketadi, bo'sh 
   it("custom'da tarif yo'qligi saqlashni BLOKLAMAYDI (haq qo'lda beriladi)", () => {
     expect(catalogRateMissing("custom", 5, "large", "bouquet", [])).toBe(false);
     expect(catalogRateMissing("standard", 5, "large", "bouquet", [])).toBe(true);
+  });
+});
+
+// euroflowers_box_catalog_frontend.md (10.09.2026) — ODDIY KATALOGDA QUTI.
+// Jonli kontrakt (OpenAPI 10.09.2026): ArrangementType enum = ["bouquet","basket","box"],
+// `florist_salary_amount` yoziladi, `composition[].quantity_stems` integer.
+describe("CF6 — quti (box): hajm majburiy emas, haq qo'lda, gul soni majburiy", () => {
+  it("standart + quti → hajm MAJBURIY EMAS (buket/savatda majburiy)", () => {
+    expect(catalogFlowRules("standard", 0, 0, "box").volumeRequired).toBe(false);
+    expect(catalogFlowRules("standard", 12, 0, "box").volumeRequired).toBe(false);
+    expect(catalogFlowRules("standard", 12, 0, "bouquet").volumeRequired).toBe(true);
+    expect(catalogFlowRules("standard", 12, 0, "basket").volumeRequired).toBe(true);
+  });
+
+  it("standart + quti + florist → florist-balans oqimi YO'Q (gul skladdan, soni bilan)", () => {
+    const r = catalogFlowRules("standard", 12, 0, "box");
+    expect(r.floristIssueMode).toBe(false);
+    expect(r.stemsRequired).toBe(true);
+  });
+
+  it("floristsiz qutida ham har bir gul soni majburiy", () => {
+    expect(catalogFlowRules("standard", 0, 0, "box").stemsRequired).toBe(true);
+  });
+
+  it("quti: florist tanlansa haq QO'LDA va MAJBURIY", () => {
+    const r = catalogFlowRules("standard", 12, 0, "box");
+    expect(r.salaryEditable).toBe(true);
+    expect(r.salaryRequired).toBe(true);
+  });
+
+  it("quti, florist tanlanmagan → haq majburiy emas (oylik yozilmaydi)", () => {
+    expect(catalogFlowRules("standard", 0, 0, "box").salaryRequired).toBe(false);
+  });
+
+  it("buket/savat: haq hech qachon majburiy emas (tarifdan olinadi)", () => {
+    expect(catalogFlowRules("standard", 12, 0, "bouquet").salaryRequired).toBe(false);
+    expect(catalogFlowRules("custom", 12, 0, "basket").salaryRequired).toBe(false);
+  });
+
+  it("qutida hajm tarifi YO'Qligi saqlashni bloklamaydi", () => {
+    expect(catalogRateMissing("standard", 12, "large", "box", [])).toBe(false);
+    expect(catalogRateMissing("standard", 12, "large", "bouquet", [])).toBe(true);
+  });
+
+  it("isBoxCatalog — faqat 'box'", () => {
+    expect(isBoxCatalog("box")).toBe(true);
+    expect(isBoxCatalog("bouquet")).toBe(false);
+    expect(isBoxCatalog("")).toBe(false);
+    expect(isBoxCatalog(null)).toBe(false);
+    expect(isBoxCatalog(undefined)).toBe(false);
+  });
+
+  it("turi berilmasa (eski chaqiruv) — avvalgi qoidalar saqlanadi", () => {
+    expect(catalogFlowRules("standard", 12, 0).floristIssueMode).toBe(true);
+    expect(catalogFlowRules("standard", 12, 0).volumeRequired).toBe(true);
+    expect(catalogFlowRules("standard", 12, 0).salaryRequired).toBe(false);
+  });
+
+  it("maxsus (custom) + quti → hajm so'ralmaydi, qolgani custom kabi", () => {
+    const r = catalogFlowRules("custom", 12, 0, "box");
+    expect(r.volumeRequired).toBe(false);
+    expect(r.stemsRequired).toBe(true);
+    expect(r.salaryEditable).toBe(true);
   });
 });
