@@ -42,6 +42,7 @@ export default function KatalogViewModal({
   onEdit,
   onDelete,
   onReturnCustom,
+  onWaste,
   onTransfer,
   onRestore,
   onRework,
@@ -52,6 +53,8 @@ export default function KatalogViewModal({
   onDelete?: () => void;
   /** «Mahsus katalogni qaytarish» — gul/material skladga qaytadi, yozuv o'chadi */
   onReturnCustom?: () => void;
+  /** «Chiqit qilish» — gul skladga QAYTMAYDI, yozuv qoladi, qoldiq kamayadi */
+  onWaste?: () => void;
   /** asosiy filial admini uchun — filialga yuborish (sotilmagan qismi bor bo'lsa) */
   onTransfer?: () => void;
   /** §3 restavratsiya — tarkibdagi so'lgan gulni almashtirish (tarkib bor bo'lsa) */
@@ -340,7 +343,7 @@ export default function KatalogViewModal({
         </a>
       )}
 
-      {(onEdit || onDelete || onTransfer || onRestore || onRework || onReturnCustom) && (
+      {(onEdit || onDelete || onTransfer || onRestore || onRework || onReturnCustom || onWaste) && (
         /* ⚠️ AMAL QATORI — umumiy `.btn-*` sinflariga o'tkazildi. Ilgari har biri
            qo'lda yasalgan edi (`rounded-xl` = 20px, kiritmalarnikidan ikki baravar
            yumaloq) va `flex-1` sabab matnidan kichrayib, «Filialga yuborish» hamda
@@ -367,6 +370,14 @@ export default function KatalogViewModal({
           {onEdit && (
             <button type="button" onClick={onEdit} className="btn-secondary">
               <Pencil size={14} strokeWidth={1.75} /> Tahrirlash
+            </button>
+          )}
+          {/* CHIQIT — qoldiq bo'lgandagina; gul skladga QAYTMAYDI, shu bois
+              ogohlantiruvchi rangda, lekin o'chirishdan oldin turadi. */}
+          {onWaste && left > 0 && (
+            <button type="button" onClick={onWaste} className="btn-secondary"
+              style={{ borderColor: "color-mix(in srgb, var(--warning-ink, #8a6d1f) 40%, var(--border-strong))", color: "var(--warning-ink, #8a6d1f)" }}>
+              <PackageMinus size={14} strokeWidth={1.9} /> Chiqit qilish
             </button>
           )}
           {/* MAXSUS KATALOGNI QAYTARISH — o'chirishning YONIDA, lekin undan OLDIN:

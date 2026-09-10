@@ -1,5 +1,6 @@
 "use client";
 import { customReturnPayload, type CustomReturnResponse } from "./customReturn";
+import { wastePayload, type WasteForm } from "./catalogWaste";
 import type {
   Accounting, AdjustDirection, AdjustInput, AdjustPreview, AdjustResult, AICatalogInput, AICatalogItem,
   CloseIssuePreview, CloseIssueInput, CloseIssueResult,
@@ -960,6 +961,15 @@ export const api = {
       ? { method: "POST", body: buildSellFormData(data, saleImage) }
       : { method: "POST", body: JSON.stringify(buildSellPayload(data)) }),
   catalogItem: (id: number) => request<CatalogItem>(`/api/catalog/${id}/`),
+  /**
+   * KATALOGNI CHIQITGA CHIQARISH — POST /api/catalog/{id}/waste/
+   * ⚠️ Sotuv ham, qaytarish ham EMAS: gul/material skladga QAYTMAYDI,
+   * katalog yozuvi o'chmaydi — `quantity_wasted` oshadi, qoldiq kamayadi.
+   * Javob — yangilangan `CatalogItem` (detal).
+   */
+  wasteCatalogItem: (id: number, form: WasteForm) =>
+    request<CatalogItem>(`/api/catalog/${id}/waste/`, { method: "POST", body: JSON.stringify(wastePayload(form)) }),
+
   /**
    * MAXSUS KATALOGNI QAYTARISH — POST /api/catalog/{id}/return-custom/
    * (euroflowers_custom_catalog_return_frontend.md). Backend gul va materialni

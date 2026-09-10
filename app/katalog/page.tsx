@@ -34,6 +34,7 @@ import { splitCatalogView } from "@/lib/catalogGroups";
 import { usePagedList } from "@/lib/usePagedList";
 import { ALL_PAGE_SIZE } from "@/lib/pagination";
 import { canReturnCustom, customReturnMessage, RETURN_CUSTOM_CONFIRM, RETURN_CUSTOM_LABEL, RETURN_CUSTOM_REASON_PLACEHOLDER } from "@/lib/customReturn";
+import { canWasteCatalog, validateWaste, WASTE_LABEL, WASTE_NOTE, WASTE_REASON_PLACEHOLDER } from "@/lib/catalogWaste";
 import type { CatalogItem, FloristProfile, Reservation } from "@/lib/types";
 import { deductionState } from "@/lib/catalogStock";
 import { floristLabel, type FloristLike } from "@/lib/floristLabel";
@@ -106,6 +107,11 @@ export default function KatalogPage() {
   const [returnCustom, setReturnCustom] = useState<CatalogItem | null>(null);
   const [returnReason, setReturnReason] = useState("");
   const [returning, setReturning] = useState(false);
+  /** «Chiqit qilish» — soni va sababi bilan (spec: euro_catalog_waste_frontend.md) */
+  const [wasteFor, setWasteFor] = useState<CatalogItem | null>(null);
+  const [wasteQty, setWasteQty] = useState("1");
+  const [wasteReason, setWasteReason] = useState("");
+  const [wasting, setWasting] = useState(false);
   const [deleting, setDeleting] = useState(false);
   // server filtrlari
   const [search, setSearch] = useState("");
@@ -286,6 +292,34 @@ export default function KatalogPage() {
       showToast(e instanceof ApiError ? e.message : "Kamaytirib bo'lmadi");
     } finally {
       setBusyId(null);
+    }
+  };
+
+  /**
+   * CHIQITGA CHIQARISH — POST /api/catalog/{id}/waste/
+   * ⚠️ Gul skladga QAYTMAYDI, yozuv o'chmaydi: javobdagi YANGILANGAN item
+   * ro'yxatga qaytib yoziladi (quantity_wasted / quantity_remaining / status).
+   */
+  const doWaste = async () => {
+    if (!wasteFor) return;
+    const left = catalogRemaining(wasteFor);
+    const v = validateWaste({ quantity: wasteQty }, left);
+    if (!v.ok) return showToast(v.error);
+    setWasting(true);
+    try {
+      const updated = await api.wasteCatalogItem(wasteFor.id, { quantity: v.quantity, reason: wasteReason });
+      patchItem(updated);
+      setViewItem((cur) => (cur?.id === updated.id ? updated : cur));
+      setWasteFor(null);
+      setWasteQty("1");
+      setWasteReason("");
+      showToast(`✓ ${v.quantity} dona chiqitga chiqarildi`);
+      load();                     // ro'yxat jamilari yangilansin
+      notifyReportDataChanged();  // chiqit tannarxi hisob-kitobga tushadi
+    } catch (e) {
+      showToast(e instanceof ApiError ? e.message : "Chiqitga chiqarib bo'lmadi");
+    } finally {
+      setWasting(false);
     }
   };
 
@@ -570,6 +604,7 @@ export default function KatalogPage() {
           onEdit={control ? () => { setEditItem(viewItem); setViewItem(null); } : undefined}
           onDelete={control ? () => setConfirmDel(viewItem) : undefined}
           onReturnCustom={control && canReturnCustom(viewItem) ? () => { setReturnReason(""); setReturnCustom(viewItem); setViewItem(null); } : undefined}
+          onWaste={control && canWasteCatalog(viewItem) ? () => { setWasteQty("1"); setWasteReason(""); setWasteFor(viewItem); setViewItem(null); } : undefined}
           onTransfer={mainUser && control && catalogRemaining(viewItem) > 0 ? () => { openTransfer(viewItem); setViewItem(null); } : undefined}
           onRestore={control ? () => { setRestoreItem(viewItem); setViewItem(null); } : undefined}
           onRework={control ? () => { setReworkOpen({ source: viewItem }); setViewItem(null); } : undefined}
@@ -596,6 +631,43 @@ export default function KatalogPage() {
           onClose={() => setReworkOpen(null)}
           onSaved={() => { setReworkOpen(null); load(); notifyReportDataChanged(); }}
         />
+      )}
+
+      {/* CHIQITGA CHIQARISH — soni + sababi */}
+      {wasteFor && createPortal(
+        <div className="fixed inset-0 z-[95] flex items-center justify-center p-5" style={{ background: "rgba(24,17,12,.4)", backdropFilter: "blur(8px)" }} onClick={() => setWasteFor(null)} role="dialog" aria-modal="true" data-lenis-prevent>
+          <div className="glass-modal w-[min(420px,100%)] p-6 animate-[rowIn_0.22s_var(--ease)_both]" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-[16px] font-bold">{WASTE_LABEL}</h3>
+            <p className="mt-2 text-[13px] leading-relaxed" style={{ color: "var(--text-2)" }}>
+              «{wasteFor.name_uz || wasteFor.name_ru}» — qoldiq {catalogRemaining(wasteFor)} dona.
+            </p>
+            <p className="mt-2 rounded-[11px] px-3 py-2 text-[12.5px] font-semibold leading-snug"
+              style={{ background: "var(--surface-2)", color: "var(--warning-ink, #8a6d1f)" }}>
+              {WASTE_NOTE}
+            </p>
+            <label className="mt-3 block">
+              <span className="mb-1.5 block text-[12px] font-semibold" style={{ color: "var(--text-2)" }}>Soni (dona)</span>
+              <input
+                className="inp"
+                inputMode="numeric"
+                value={wasteQty}
+                onChange={(e) => setWasteQty(e.target.value.replace(/\D/g, ""))}
+                aria-label="Chiqit soni"
+                autoFocus
+              />
+            </label>
+            <label className="mt-3 block">
+              <span className="mb-1.5 block text-[12px] font-semibold" style={{ color: "var(--text-2)" }}>Sabab (ixtiyoriy)</span>
+              <input className="inp" value={wasteReason} onChange={(e) => setWasteReason(e.target.value)}
+                placeholder={WASTE_REASON_PLACEHOLDER} aria-label="Chiqit sababi" />
+            </label>
+            <div className="mt-5 flex gap-2.5">
+              <button onClick={() => setWasteFor(null)} className="btn-ghost flex-1">Bekor qilish</button>
+              <button onClick={doWaste} disabled={wasting} className={`btn-primary flex-1 ${wasting ? "btn-loading" : ""}`}>Chiqitga chiqarish</button>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
 
       {/* MAXSUS KATALOGNI QAYTARISH tasdig'i — matnlar spec'dan AYNAN */}
