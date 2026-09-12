@@ -707,6 +707,32 @@ export function buildVolumeRatesPayload(cells: RateCell[]): VolumeRateInput[] {
     }));
 }
 
+/**
+ * KATALOG FORMASIDAN TARIF YARATISH — florist + turi + hajm uchun tarif YO'Q bo'lsa operator
+ * haqni va gul sonini shu yerda kiritadi, forma tarifni yaratib KEYIN katalogni saqlaydi
+ * (12.09.2026: backend standart katalog haqini FAQAT tarifdan oladi, qo'lda yuborilgani
+ * e'tiborga olinmaydi — «tarif belgilanmagan» 400 ni operator ko'rmasin).
+ *
+ * ⚠️ YAGONA yozuv yo'li TO'LIQ ALMASHTIRISH (PATCH /florists/{id}/ volume_rates): ro'yxatda
+ *    bo'lmagan katak NOFAOL bo'ladi. Shuning uchun `existing` — floristning YANGI olingan faol
+ *    tariflari — AYNAN qaytariladi, ustiga yangi (turi, hajm) qatori qo'shiladi. Shu (turi, hajm)
+ *    allaqachon bo'lsa (poyga) — ustidan yoziladi (unique-key 400 bermasin). Vitest bilan qamralgan.
+ */
+export function upsertVolumeRatePayload(
+  existing: FloristVolumeRate[],
+  add: { arrangement_type: ArrangementType; volume: CatalogVolume; florist_fee: number; default_stems: number },
+): VolumeRateInput[] {
+  const keep = existing
+    .filter((r) => r.is_active !== false && !(r.arrangement_type === add.arrangement_type && r.volume === add.volume))
+    .map((r) => ({
+      arrangement_type: r.arrangement_type,
+      volume: r.volume,
+      florist_fee: String(Math.round(+r.florist_fee)),
+      ...(r.default_stems != null ? { default_stems: r.default_stems } : {}),
+    }));
+  return [...keep, { arrangement_type: add.arrangement_type, volume: add.volume, florist_fee: String(Math.round(add.florist_fee)), default_stems: Math.round(add.default_stems) }];
+}
+
 /** Katalog `florist_salary_amount` payload — ⚠️ HAR IKKI rejimda forma qiymati YUBORILADI (florist
     haqi endi TAHRIRLANADI; auto-fill tarifdan, lekin operator ustidan yozishi mumkin). ZERO ≠ BO'SH:
         · "" / null → kalit TUSHIRILADI (tarif yo'q va bo'sh qoldirildi)

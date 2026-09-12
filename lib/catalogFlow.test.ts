@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { catalogFlowRules, normalizeComposition, catalogRateMissing, catalogSalaryPayload, rateSalaryForCatalog, buildVolumeRatesPayload, ARRANGEMENTS, ARRANGEMENT_UZ, VOLUMES } from "./inventory";
+import { catalogFlowRules, normalizeComposition, catalogRateMissing, catalogSalaryPayload, rateSalaryForCatalog, buildVolumeRatesPayload, upsertVolumeRatePayload, ARRANGEMENTS, ARRANGEMENT_UZ, VOLUMES } from "./inventory";
 import type { FloristVolumeRate } from "./types";
 
 // euroflowers_frontend_update.md §8 (custom inventory oqimi) va §9 (standard inventory oqimi).
@@ -147,6 +147,44 @@ describe("CF6 — quti (box): oddiy katalogda buket/savat bilan BIR XIL (12.09.2
     expect(out).toEqual([
       { arrangement_type: "box", volume: "small", florist_fee: "40000", default_stems: 10 },
       { arrangement_type: "bouquet", volume: "small", florist_fee: "30000" },
+    ]);
+  });
+});
+
+// KATALOG FORMASIDAN TARIF YARATISH — tarif yo'q bo'lsa operator haq + gul sonini formada
+// kiritadi, forma tarifni yaratib keyin katalogni saqlaydi. ⚠️ TO'LIQ ALMASHTIRISH payload'i —
+// mavjud faol tariflar AYNAN saqlanishi SHART (yuborilmagan katak nofaol bo'lib qolardi).
+describe("CF7 — upsertVolumeRatePayload: mavjud tariflar saqlanadi + yangi (turi, hajm) qo'shiladi", () => {
+  const existing: FloristVolumeRate[] = [
+    boxRate({ id: 1, arrangement_type: "bouquet", volume: "small", florist_fee: "40000.00", default_stems: 15 }),
+    boxRate({ id: 2, arrangement_type: "bouquet", volume: "medium", florist_fee: "60000.00", default_stems: null }),
+    boxRate({ id: 3, arrangement_type: "basket", volume: "large", florist_fee: "110000.00", default_stems: 55, is_active: false }),
+  ];
+
+  it("faol tariflar aynan qaytadi (fee yaxlitlangan, stems bo'lsa), yangisi oxirida", () => {
+    expect(upsertVolumeRatePayload(existing, { arrangement_type: "box", volume: "medium", florist_fee: 50000, default_stems: 12 })).toEqual([
+      { arrangement_type: "bouquet", volume: "small", florist_fee: "40000", default_stems: 15 },
+      { arrangement_type: "bouquet", volume: "medium", florist_fee: "60000" },
+      { arrangement_type: "box", volume: "medium", florist_fee: "50000", default_stems: 12 },
+    ]);
+  });
+
+  it("nofaol tarif yuborilmaydi (nofaol qoladi)", () => {
+    const out = upsertVolumeRatePayload(existing, { arrangement_type: "box", volume: "small", florist_fee: 30000, default_stems: 8 });
+    expect(out.some((r) => r.arrangement_type === "basket")).toBe(false);
+  });
+
+  it("shu (turi, hajm) allaqachon bo'lsa — ustidan yoziladi, dublikat yo'q", () => {
+    const out = upsertVolumeRatePayload(existing, { arrangement_type: "bouquet", volume: "medium", florist_fee: 65000, default_stems: 25 });
+    expect(out.filter((r) => r.arrangement_type === "bouquet" && r.volume === "medium")).toEqual([
+      { arrangement_type: "bouquet", volume: "medium", florist_fee: "65000", default_stems: 25 },
+    ]);
+    expect(out).toHaveLength(2);
+  });
+
+  it("floristda tarif umuman yo'q → faqat yangi qator", () => {
+    expect(upsertVolumeRatePayload([], { arrangement_type: "box", volume: "large", florist_fee: 90000.6, default_stems: 30.2 })).toEqual([
+      { arrangement_type: "box", volume: "large", florist_fee: "90001", default_stems: 30 },
     ]);
   });
 });
