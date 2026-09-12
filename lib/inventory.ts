@@ -616,7 +616,7 @@ export const isBoxCatalog = (arrangement: ArrangementType | "" | null | undefine
 
 /** Backend xatosining aynan mazmuni — operator 400 ni kashf qilmasin (klientda to'xtatamiz). */
 export const BOX_SALARY_REQUIRED = "Quti uchun floristga beriladigan pulni kiriting — hajm tarifi qo'llanilmaydi";
-export const BOX_STEMS_REQUIRED = "Quti katalogida har bir gulning soni majburiy — gul to'g'ridan-to'g'ri skladdan yechiladi";
+export const BOX_STEMS_REQUIRED = "Quti katalogida har bir gulning soni majburiy — qaysi guldan necha dona ketishini kiriting";
 
 /**
  * STANDART katalog + florist + hajm tanlangan bo'lsa HAJM TARIFI MAJBURIY.
@@ -648,7 +648,9 @@ export const catalogRateMissing = (
  *    Shu sababli «florist balansidan gul tanlash» oqimi (soni yo'q, chiqim yopilganda
  *    taqsimlanadi) FAQAT STANDART katalogda qoladi.
  *
- *  • floristIssueMode — florist balansi oqimi (standart + florist tanlangan)
+ *  • floristIssueMode — florist balansi oqimi (standart + florist tanlangan), SONI YO'Q
+ *  • floristBoxMode   — QUTI + florist: gul FLORISTGA CHIQARILGAN balansdan tanlanadi, lekin
+ *                       SONI BILAN (backend quantity_stems talab qiladi). Skladdan EMAS.
  *  • volumeRequired   — §9: standartda hajm majburiy; custom'da florist bo'lsa ham so'raladi
  *  • stemsRequired    — §8: custom (va filial) katalogda gul SONI majburiy
  *  • salaryEditable   — §9: standartda oylik hajm tarifidan (qo'lda kiritilmaydi); custom'da qo'lda
@@ -658,14 +660,17 @@ export const catalogFlowRules = (
   florist: number | null | undefined,
   branch: number | null | undefined,
   arrangement?: ArrangementType | "" | null,
-): { floristIssueMode: boolean; volumeRequired: boolean; stemsRequired: boolean; salaryEditable: boolean; salaryRequired: boolean } => {
+): { floristIssueMode: boolean; floristBoxMode: boolean; volumeRequired: boolean; stemsRequired: boolean; salaryEditable: boolean; salaryRequired: boolean } => {
   const floristMode = (florist ?? 0) > 0;
   const branchMode = (branch ?? 0) > 0;
   const boxMode = isBoxCatalog(arrangement);
   return {
-    // QUTI florist-balans oqimiga TUSHMAYDI — backend har bir qator uchun soni talab qiladi,
+    // QUTI «soni yo'q» oqimiga TUSHMAYDI — backend har bir qator uchun soni talab qiladi,
     // florist oqimida esa son chiqim yopilganda yoziladi (0 yuboriladi) → 400.
     floristIssueMode: floristMode && kind === "standard" && !boxMode,
+    // ⚠️ QUTI + florist — gul baribir FLORISTGA CHIQARILGAN guldan tanlanadi (standart katalog
+    //    = florist balansi, §9), faqat SONI ham kiritiladi. Skladdan tanlash XATO edi (12.09.2026).
+    floristBoxMode: floristMode && kind === "standard" && boxMode,
     volumeRequired: !boxMode && (kind === "standard" || floristMode),
     stemsRequired: boxMode || kind === "custom" || branchMode,
     salaryEditable: boxMode || kind === "custom",

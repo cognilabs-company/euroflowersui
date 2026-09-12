@@ -92,14 +92,27 @@ describe("CF6 — quti (box): hajm majburiy emas, haq qo'lda, gul soni majburiy"
     expect(catalogFlowRules("standard", 12, 0, "basket").volumeRequired).toBe(true);
   });
 
-  it("standart + quti + florist → florist-balans oqimi YO'Q (gul skladdan, soni bilan)", () => {
+  // ⚠️ 12.09.2026 tuzatish: quti+florist SKLADDAN emas — FLORISTGA CHIQARILGAN guldan tanlanadi,
+  //    faqat soni bilan (floristBoxMode). «Soni yo'q» oqimi (floristIssueMode) esa qutida yo'q.
+  it("standart + quti + florist → floristBoxMode (gul florist balansidan, SONI BILAN)", () => {
     const r = catalogFlowRules("standard", 12, 0, "box");
     expect(r.floristIssueMode).toBe(false);
+    expect(r.floristBoxMode).toBe(true);
     expect(r.stemsRequired).toBe(true);
   });
 
-  it("floristsiz qutida ham har bir gul soni majburiy", () => {
-    expect(catalogFlowRules("standard", 0, 0, "box").stemsRequired).toBe(true);
+  it("floristBoxMode FAQAT standart + quti + florist'da; buket/savat, custom, floristsiz → false", () => {
+    expect(catalogFlowRules("standard", 12, 0, "bouquet").floristBoxMode).toBe(false);
+    expect(catalogFlowRules("standard", 12, 0, "basket").floristBoxMode).toBe(false);
+    expect(catalogFlowRules("standard", 0, 0, "box").floristBoxMode).toBe(false);
+    expect(catalogFlowRules("custom", 12, 0, "box").floristBoxMode).toBe(false);
+    expect(catalogFlowRules("standard", 12, 0).floristBoxMode).toBe(false);
+  });
+
+  it("floristsiz qutida ham har bir gul soni majburiy (gul skladdan)", () => {
+    const r = catalogFlowRules("standard", 0, 0, "box");
+    expect(r.stemsRequired).toBe(true);
+    expect(r.floristBoxMode).toBe(false);
   });
 
   it("quti: florist tanlansa haq QO'LDA va MAJBURIY", () => {
