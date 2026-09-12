@@ -1606,7 +1606,8 @@ export type FloristVolumeRate = {
   id: number;
   florist?: number;
   florist_name?: string;
-  arrangement_type: "bouquet" | "basket";
+  /** 12.09.2026 dan `box` (quti) ham — standart quti katalogi haqi va gul soni shu tarifdan. */
+  arrangement_type: ArrangementType;
   /** DIQQAT: doim "small"|"medium"|"large" saqlanadi (aynan katalog volume bilan
       mos kelishi shart — moslik satr-tenglik). API'da erkin satr, lekin biz S/M/L
       YOZMAYMIZ — auto-to'ldirish jimgina ishlamay qolardi. */

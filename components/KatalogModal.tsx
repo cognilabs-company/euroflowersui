@@ -16,10 +16,10 @@ import ImageInput from "./ImageInput";
 import { Icon } from "./icons";
 import { ARRANGEMENT_LABEL } from "./badges";
 import { fmt } from "@/lib/format";
-import { KIND_LABEL, PACKAGING_LABEL, VOLUME_LABEL, stems as stemsFmt, formatStemsAndBunches, normalizeComposition, normalizeMaterials, rateSalaryForCatalog, catalogRateMissing, rateToCatalogSalary, catalogSalaryPayload, catalogFlowRules, isBoxCatalog, BOX_SALARY_REQUIRED, BOX_STEMS_REQUIRED, ratesForFlorist, batchDeliveryTag, buildFloristComposition, catalogClosed } from "@/lib/inventory";
+import { KIND_LABEL, PACKAGING_LABEL, VOLUME_LABEL, stems as stemsFmt, formatStemsAndBunches, normalizeComposition, normalizeMaterials, rateSalaryForCatalog, catalogRateMissing, rateToCatalogSalary, catalogSalaryPayload, catalogFlowRules, ratesForFlorist, batchDeliveryTag, buildFloristComposition, catalogClosed } from "@/lib/inventory";
 import { usableInCatalog } from "@/lib/materialUnit";
 import FloristCompositionPicker from "./FloristCompositionPicker";
-import type { ArrangementType, Branch, CatalogItem, CatalogKind, CatalogVolume, FloristProfile, FloristStockBalance, FloristVolumeRate, Packaging, StockBatch } from "@/lib/types";
+import type { ArrangementType, Branch, CatalogItem, CatalogKind, CatalogVolume, FloristProfile, FloristVolumeRate, Packaging, StockBatch } from "@/lib/types";
 
 type CompRow = { stock_batch: number; mode: "stems" | "bunches"; qty: string };
 /** ⚠️ Qator TURI eslab qolinadi: «Material qo'shish» bosilsa tanlagichda FAQAT material,
@@ -157,25 +157,10 @@ export default function KatalogModal({ item = null, onClose, onSaved }: { item?:
   //    FAQAT STANDART katalogda qoladi.
   // ⚠️ Qoidalar YAGONA joyda (lib/inventory: catalogFlowRules) — Vitest bilan qamralgan:
   //    volumeRequired (§9 hajm majburiy), stemsRequired (§8 soni majburiy), floristIssueMode.
-  // ⚠️ QUTI (box) — 10.09.2026 backend: oddiy katalogda quti hajmsiz, haqi qo'lda, gul soni bilan.
-  const boxMode = isBoxCatalog(f.arrangement_type);
-  // ⚠️ floristBoxMode (12.09.2026) — QUTI + florist: gul FLORISTGA CHIQARILGAN guldan tanlanadi
-  //    (skladdan EMAS), lekin soni bilan. Sklad qatorlari UI'si ishlatiladi, manba — florist balansi.
-  const { floristIssueMode, floristBoxMode, volumeRequired, stemsRequired, salaryRequired } = catalogFlowRules(kind, florist, branch, f.arrangement_type);
-  // Quti+florist uchun floristning balansi (null = yuklanmoqda). Faqat shu rejimda so'raladi.
-  const [floristBalances, setFloristBalances] = useState<FloristStockBalance[] | null>(null);
-  useEffect(() => {
-    if (!floristBoxMode) { setFloristBalances(null); return; }
-    let alive = true;
-    setFloristBalances(null);
-    api.floristStockBalances({ florist, page_size: "all" })
-      .then((bs) => { if (alive) setFloristBalances(bs); })
-      .catch(() => { if (alive) setFloristBalances([]); });
-    return () => { alive = false; };
-  }, [floristBoxMode, florist]);
-  // ⚠️ TAHRIRda avval SAQLANGAN partiyalar ham «tutiladi» deb hisoblanadi — ular saqlanganda
-  //    floristda bo'lgan; hozir balansda ko'rinmasa (yechilgan) ham tahrir bloklanmasin.
-  const heldByFlorist = useMemo(() => new Set([...(floristBalances ?? []).map((b) => b.batch), ...(item?.composition ?? []).map((c) => c.stock_batch)]), [floristBalances, item]);
+  // ⚠️ QUTI (box) — 12.09.2026 backend: oddiy katalogda quti BUKET/SAVAT KABI ishlaydi (hajm
+  //    majburiy, haq va gul soni quti hajm tarifidan, chiqim yopilganda avtomatik taqsimot).
+  //    Alohida quti oqimi (10.09.2026: hajmsiz, haq qo'lda, soni majburiy) OLIB TASHLANDI.
+  const { floristIssueMode, volumeRequired, stemsRequired } = catalogFlowRules(kind, florist, branch);
   // YOPILGAN florist katalogi (hamma qatorda soni > 0) — tarkib READ-ONLY (adjust bilan tuzatiladi).
   // Kutayotgan (soni 0) — gul o'zgartirilishi mumkin.
   const isFloristClosed = !!item && catalogClosed(item);
@@ -193,17 +178,15 @@ export default function KatalogModal({ item = null, onClose, onSaved }: { item?:
 
   // ⚠️ §8 — STANDART → MAXSUS almashtirilganda florist balansidan tanlangan gul(lar) YO'QOLMASIN:
   //    o'sha partiyalar sklad qatorlariga ko'chiriladi (soni bo'sh — operator kiritadi).
-  //    ⚠️ QUTI ham xuddi shunday: box tanlansa florist-balans oqimi o'chadi (backend soni talab
-  //    qiladi) — tanlangan partiyalar sklad qatorlariga ko'chiriladi.
   useEffect(() => {
-    if (floristIssueMode || floristBatches.length === 0) return;
+    if (kind !== "custom" || floristBatches.length === 0) return;
     setComp((rows) => {
       const filled = rows.filter((r) => r.stock_batch > 0 && (parseFloat(r.qty) || 0) > 0);
       const have = new Set(filled.map((r) => r.stock_batch));
       const added = floristBatches.filter((id) => id > 0 && !have.has(id)).map((id) => ({ stock_batch: id, mode: "stems" as const, qty: "" }));
       return added.length ? [...filled, ...added] : rows;
     });
-  }, [kind, floristBatches, floristIssueMode]);
+  }, [kind, floristBatches]);
 
   // ⚠️ Operator xatoni TUZATGACH qizil banner turib qolmasin: gul/material qatorlari
   //    o'zgarishi bilan tegishli xato darrov so'nadi (saqlashni kutmaymiz).
@@ -219,10 +202,8 @@ export default function KatalogModal({ item = null, onClose, onSaved }: { item?:
   const accessories = useMemo(() => materials.filter((m) => m.packaging_type === "other"), [materials]);
   const catalogMaterials = useMemo(() => materials.filter((m) => m.packaging_type !== "other"), [materials]);
   const spbOf = (id: number) => batchOf(id)?.stems_per_bunch || 1;
-  // MAVJUD miqdor — sklad qoldig'idan (warehouse rejimi); QUTI+florist'da FLORIST qo'lidagi qoldiq.
-  const availOf = (id: number) => floristBoxMode
-    ? (floristBalances ?? []).find((b) => b.batch === id)?.remaining_stems ?? 0
-    : batchOf(id)?.remaining_stems ?? 0;
+  // MAVJUD miqdor — sklad qoldig'idan (warehouse rejimi)
+  const availOf = (id: number) => batchOf(id)?.remaining_stems ?? 0;
   const stemsOfRow = (r: CompRow) => {
     const n = parseFloat(r.qty) || 0;
     return r.mode === "bunches" ? Math.round(n * spbOf(r.stock_batch)) : Math.round(n);
@@ -235,49 +216,14 @@ export default function KatalogModal({ item = null, onClose, onSaved }: { item?:
     const used = new Set(comp.map((r) => r.stock_batch));
     return batches.filter((b) => b.remaining_stems > 0 || used.has(b.id));
   }, [batches, comp]);
-  const compOptions = useMemo(() => {
-    // ⚠️ QUTI + florist — variantlar FLORISTGA CHIQARILGAN gullar (balans), sklad emas.
-    //    Narx sklad partiyasidan (batches HAMMASI yuklangan), qoldiq esa florist qo'lidagi.
-    if (floristBoxMode) {
-      const fromBalance = (floristBalances ?? []).map((b) => {
-        const bd = b.batch_detail;
-        const sb = batchOf(b.batch);
-        return {
-          value: b.batch,
-          label: batchTitleNoHeight(bd, `Partiya #${b.batch}`),
-          sub: `№${bd?.batch_number ?? b.batch}${bd?.height_label ? ` · ${bd.height_label}` : ""} · floristda: ${formatStemsAndBunches(b.remaining_stems, bd?.stems_per_bunch ?? sb?.stems_per_bunch)}${sb ? ` · ${fmt(sb.sale_price_per_stem)}/dona` : ""}`,
-        };
-      });
-      // tahrirdagi SAQLANGAN partiya balansda bo'lmasa ham variantda tursin (Select bo'sh ko'rinmasin)
-      const inBalance = new Set(fromBalance.map((o) => o.value));
-      const saved = (item?.composition ?? []).filter((c) => !inBalance.has(c.stock_batch)).map((c) => {
-        const sb = batchOf(c.stock_batch);
-        return { value: c.stock_batch, label: sb ? batchTitle(sb, "") : batchTitleNoHeight(c.batch_detail, `Partiya #${c.stock_batch}`), sub: `saqlangan: ${stemsFmt(c.quantity_stems)}` };
-      });
-      return [...fromBalance, ...saved];
-    }
-    return usableBatches.map((bb) => {
-      const dtag = batchDeliveryTag(bb.delivery_detail); // ikki o'xshash partiyani ajratish
-      return {
-        value: bb.id,
-        label: batchTitle(bb, ""),
-        sub: `${formatStemsAndBunches(bb.remaining_stems, bb.stems_per_bunch)} · ${fmt(bb.sale_price_per_stem)}/dona${dtag ? ` · ${dtag}` : ""}`,
-      };
-    });
-  }, [usableBatches, floristBoxMode, floristBalances, batches]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ⚠️ QUTI + florist: balans kelgach, SKLADDAN default to'ldirilgan (soni bo'sh) qatorlar
-  //    tozalanadi — florist tutmaydigan gul jimgina tanlangan bo'lib turmasin. Soni kiritilgan
-  //    qator saqlanadi va qator ostida «florist bu gulni tutmaydi» deb belgilanadi.
-  useEffect(() => {
-    if (!floristBoxMode || floristBalances === null) return;
-    setComp((rows) => {
-      const next = rows.map((r) => (r.stock_batch > 0 && !heldByFlorist.has(r.stock_batch) && !(parseFloat(r.qty) > 0) ? { ...r, stock_batch: 0 } : r));
-      return next.some((r, i) => r !== rows[i]) ? next : rows;
-    });
-    // `batches` ham deps'da: sklad ro'yxati balansdan KEYIN kelsa, u birinchi qatorni skladdagi
-    // partiya bilan to'ldiradi — shu effekt uni qayta tozalaydi (idempotent).
-  }, [floristBoxMode, floristBalances, heldByFlorist, batches]);
+  const compOptions = useMemo(() => usableBatches.map((bb) => {
+    const dtag = batchDeliveryTag(bb.delivery_detail); // ikki o'xshash partiyani ajratish
+    return {
+      value: bb.id,
+      label: batchTitle(bb, ""),
+      sub: `${formatStemsAndBunches(bb.remaining_stems, bb.stems_per_bunch)} · ${fmt(bb.sale_price_per_stem)}/dona${dtag ? ` · ${dtag}` : ""}`,
+    };
+  }), [usableBatches]);
 
   // DUBLIKAT: bir xil stock_batch tanlansa — ikkinchi qator qo'shilmaydi,
   // mavjud qatorga miqdor qo'shiladi (qator qisqa yonib chiqadi + toast).
@@ -301,7 +247,7 @@ export default function KatalogModal({ item = null, onClose, onSaved }: { item?:
   };
   const addComp = () => {
     const used = new Set(comp.map((r) => r.stock_batch));
-    // keyingi bo'sh variant — joriy rejim manbasidan (florist balansi yoki sklad)
+    // keyingi bo'sh sklad partiyasi
     const next = compOptions.find((o) => !used.has(+o.value))?.value ?? compOptions[0]?.value ?? 0;
     setComp([...comp, { stock_batch: +next, mode: "bunches", qty: "" }]); // yangi qator POCHKA default
   };
@@ -370,16 +316,11 @@ export default function KatalogModal({ item = null, onClose, onSaved }: { item?:
       setErrs((x) => { if (!x.volume && !x.florist_salary_amount) return x; const n = { ...x }; delete n.volume; delete n.florist_salary_amount; return n; });
       return;
     }
-    // ⚠️ QUTI — haq HAR SAFAR QO'LDA (spec: «Quti uchun florist haqi S/M/L tarifdan olinmaydi»).
-    //    Buketdan qutiga o'tilganda tarifdan tushgan summa JIMGINA qolib ketmasin — tozalanadi.
-    if (boxMode) {
-      setF((p) => (p.florist_salary_amount && !salaryTouched ? { ...p, florist_salary_amount: "" } : p));
-      return;
-    }
     if (salaryTouched) return;
+    // ⚠️ Turi (buket/savat/QUTI) ham tarif kaliti — quti tarifi 12.09.2026 dan alohida qator.
     const rate = rateFor(volume, f.arrangement_type);
     setF((p) => ({ ...p, florist_salary_amount: rate ? rateToCatalogSalary(rate) : "" }));
-  }, [volume, f.arrangement_type, florist, rates, salaryTouched, isApprentice, boxMode]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [volume, f.arrangement_type, florist, rates, salaryTouched, isApprentice]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // «Tarifga qaytarish» — qo'lda yozilgandan keyin tarif qiymatini tiklaydi (auto-fill'ni qayta yoqadi).
   const reapplyRate = () => {
@@ -439,12 +380,6 @@ export default function KatalogModal({ item = null, onClose, onSaved }: { item?:
       setErrs((x) => ({ ...x, volume: `${who} uchun «${vol}» hajm tarifi belgilanmagan — avval tarifni kiriting` }));
       return showToast(`${who} uchun «${vol}» hajm tarifi yo'q`);
     }
-    // ⚠️ QUTI + florist — haq MAJBURIY (backend: {"florist_salary_amount": ["Quti uchun
-    //    floristga beriladigan pulni kiriting"]}). Shogirtda oylik yozilmaydi → tekshirilmaydi.
-    if (salaryRequired && !isApprentice && !(+f.florist_salary_amount > 0)) {
-      setErrs((x) => ({ ...x, florist_salary_amount: BOX_SALARY_REQUIRED }));
-      return showToast("Florist haqini kiriting");
-    }
     // §9 STANDART florist katalogi: gul MAJBURIY (kutayotgan/yangi holatda; yopilgan read-only). Soni EMAS.
     if (floristIssueMode && !isFloristClosed && floristBatches.filter((id) => id > 0).length === 0) {
       setErrs((x) => ({ ...x, composition: "Floristga chiqarilgan qaysi guldan yasalganini tanlang" }));
@@ -460,23 +395,16 @@ export default function KatalogModal({ item = null, onClose, onSaved }: { item?:
     if (stemsRequired && !compLocked && !comp.some((r) => r.stock_batch && stemsOfRow(r) > 0)) {
       setErrs((x) => ({
         ...x,
-        composition: boxMode
-          ? BOX_STEMS_REQUIRED
-          : kind === "custom"
-            ? "Maxsus katalogda gul va soni majburiy — gul to'g'ridan-to'g'ri skladdan yechiladi"
-            : "Filial katalogida gul va soni majburiy — qaysi guldan necha dona ketishini kiriting",
+        composition: kind === "custom"
+          ? "Maxsus katalogda gul va soni majburiy — gul to'g'ridan-to'g'ri skladdan yechiladi"
+          : "Filial katalogida gul va soni majburiy — qaysi guldan necha dona ketishini kiriting",
       }));
       return showToast("Gul sonini kiriting");
     }
     // ⚠️ Tanlangan, ammo SONI YO'Q qator jimgina tushib qolmasin — aniq aytamiz.
     if (stemsRequired && !compLocked && comp.some((r) => r.stock_batch > 0 && stemsOfRow(r) <= 0)) {
-      setErrs((x) => ({ ...x, composition: boxMode ? BOX_STEMS_REQUIRED : "Har bir tanlangan gulning sonini kiriting (0 emas)" }));
+      setErrs((x) => ({ ...x, composition: "Har bir tanlangan gulning sonini kiriting (0 emas)" }));
       return showToast("Gul sonini kiriting");
-    }
-    // ⚠️ QUTI + florist: tanlangan gul FLORISTDA bo'lishi shart (florist almashgan bo'lsa qolib ketmasin).
-    if (floristBoxMode && !compLocked && comp.some((r) => r.stock_batch > 0 && !heldByFlorist.has(r.stock_batch))) {
-      setErrs((x) => ({ ...x, composition: "Tanlangan gul bu floristga chiqarilmagan — floristdagi guldan tanlang" }));
-      return showToast("Bu gul floristda yo'q");
     }
     // NORMALLASHTIRISH: bir xil stock_batch/packaging qatorlari BITTAGA
     // birlashtiriladi (bitta buket = bitta item, ko'p qatorli composition).
@@ -706,24 +634,13 @@ export default function KatalogModal({ item = null, onClose, onSaved }: { item?:
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="Nomi (uz)" span><input className="inp" value={f.name_uz} onChange={set("name_uz")} placeholder="Masalan: Gortenziya savat" /><Err k="name_uz" /></Field>
         <Field label="Turi">
-          {/* ⚠️ QUTI (box) — 10.09.2026 dan ODDIY katalogda ham bor. Tarif enum'i (E15Enum =
-              bouquet/basket) qutini qabul qilmaydi → haq qo'lda. Florist tanlansa gul FLORISTGA
-              CHIQARILGAN guldan (balans) tanlanadi, faqat SONI BILAN (floristBoxMode). */}
+          {/* ⚠️ QUTI (box) — 12.09.2026 dan ODDIY katalogda BUKET/SAVAT KABI: hajm majburiy, haq va
+              gul soni floristning QUTI hajm tarifidan (tarif enum'i = bouquet/basket/box). */}
           <Select value={f.arrangement_type} onChange={(v) => { const a = v as ArrangementType; setF((p) => ({ ...p, arrangement_type: a })); setErrs((x) => { const n = { ...x }; delete n.arrangement_type; delete n.volume; delete n.composition; return n; }); }} options={(["bouquet", "basket", "box"] as const).map((t) => ({ value: t, label: ARRANGEMENT_LABEL[t] }))} />
           <Err k="arrangement_type" />
-          {boxMode && florist > 0 && kind === "standard" && (
-            <span className="mt-1 block text-[11.5px] font-semibold" style={{ color: "var(--text-2)" }}>
-              Quti — gul <b>floristga chiqarilgan guldan soni bilan</b> tanlanadi, florist haqi <b>qo&apos;lda</b> kiritiladi.
-            </span>
-          )}
         </Field>
           <Field label={effectiveVolumeRequired ? "Hajm (majburiy)" : "Hajm"}>
           <Select value={volume} onChange={(v) => { const vol = v as CatalogVolume | ""; setVolume(vol); setErrs((x) => { const n = { ...x }; delete n.volume; return n; }); }} placeholder="Tanlang" options={[{ value: "", label: "—" }, ...(["small", "medium", "large"] as const).map((v) => ({ value: v, label: VOLUME_LABEL[v] }))]} />
-          {boxMode && (
-            <span className="mt-1 block text-[11.5px] font-medium" style={{ color: "var(--muted)" }}>
-              Quti uchun ixtiyoriy — hajm tarifi qo&apos;llanilmaydi (faqat hisobot uchun).
-            </span>
-          )}
           <Err k="volume" />
         </Field>
         {/* ⚠️ FILIAL rejimida FLORIST YO'Q — filial katalogi florist katalogi emas (chiqim yopish
@@ -763,7 +680,7 @@ export default function KatalogModal({ item = null, onClose, onSaved }: { item?:
               operator saqlashdan oldin AYNAN shu sonni ko'radi (30 × 2 = 60 dona). */}
           {!floristIssueMode && perUnitStems > 0 && (
             <p className="mt-1 text-[11.5px] font-semibold" style={{ color: "var(--text-2)" }}>
-              {qtyTotal} dona × {stemsFmt(perUnitStems)} gul = <b style={{ color: "var(--acc)" }}>{stemsFmt(qtyTotal * perUnitStems)}</b> {floristBoxMode ? "florist qo'lidan" : "skladdan"} yechiladi
+              {qtyTotal} dona × {stemsFmt(perUnitStems)} gul = <b style={{ color: "var(--acc)" }}>{stemsFmt(qtyTotal * perUnitStems)}</b> skladdan yechiladi
             </p>
           )}
           {/* ⚠️ §1 SON TAHRIRI: kutayotgan florist katalogda bemalol; yopilgandan keyin oshirish gul talab qiladi. */}
@@ -822,7 +739,7 @@ export default function KatalogModal({ item = null, onClose, onSaved }: { item?:
           <div className="flex items-start gap-2">
             <AlertTriangle size={16} strokeWidth={2} className="mt-0.5 shrink-0" style={{ color: "var(--danger-ink)" }} />
             <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-bold" style={{ color: "var(--danger-ink)" }}>{!stockError.shortage ? "Saqlab bo'lmadi" : stockError.lines.some((l) => /material/i.test(l)) ? "Material qoldig'i yetarli emas" : floristIssueMode || floristBoxMode ? "Florist qo'lida yetarli gul yo'q" : "Skladda yetarli qoldiq yo'q"}</div>
+              <div className="text-[13px] font-bold" style={{ color: "var(--danger-ink)" }}>{!stockError.shortage ? "Saqlab bo'lmadi" : stockError.lines.some((l) => /material/i.test(l)) ? "Material qoldig'i yetarli emas" : floristIssueMode ? "Florist qo'lida yetarli gul yo'q" : "Skladda yetarli qoldiq yo'q"}</div>
               <div className="mt-1.5 flex flex-col gap-0.5 text-[12.5px]" style={{ color: "var(--text-2)" }}>
                 {stockError.lines.map((ln, i) => {
                   const ci = ln.indexOf(":");
@@ -834,7 +751,7 @@ export default function KatalogModal({ item = null, onClose, onSaved }: { item?:
                 })}
               </div>
               {/* ⚠️ §1 YOPILGAN florist katalog sonini oshirdi → gul yetmadi. IKKI YECHIM: gul chiqarish yoki adjust. */}
-              {stockError.shortage && (floristIssueMode || floristBoxMode) ? (
+              {stockError.shortage && floristIssueMode ? (
                 <div className="mt-2.5 flex flex-wrap gap-2">
                   <button type="button" onClick={() => { if (typeof window !== "undefined") window.location.assign(`/floristlarga-chiqarilgan?florist=${florist}`); }} className="rounded-full border px-3 py-1 text-[12px] font-bold transition-colors hover:bg-[var(--hover)]" style={{ borderColor: "var(--danger-ink)", color: "var(--danger-ink)" }}>Floristga gul chiqarish →</button>
                   <button type="button" onClick={() => { if (typeof window !== "undefined") window.location.assign(`/floristlarga-chiqarilgan?tab=balanslar`); }} className="rounded-full border px-3 py-1 text-[12px] font-bold transition-colors hover:bg-[var(--hover)]" style={{ borderColor: "var(--border-strong)", color: "var(--text-2)" }}>Hisobni to&apos;g&apos;rilash (adjust) →</button>
@@ -905,21 +822,10 @@ export default function KatalogModal({ item = null, onClose, onSaved }: { item?:
         </>
       ) : (
       <>
-      <Section>{floristBoxMode ? "Gullar (florist qo'lidan)" : "Gullar (skladdan)"}</Section>
+      <Section>Gullar (skladdan)</Section>
       {/* ⚠️ §8 — MAXSUS katalogda florist tanlangan bo'lsa ham gul SKLADDAN yechiladi.
           Operator buni saqlashdan OLDIN bilishi shart: standart katalogda xuddi shu tanlov
           floristning balansidan yechilardi, custom'da esa balansga TEGILMAYDI. */}
-      {/* ⚠️ QUTI + florist (floristBoxMode) — variantlar FLORISTGA CHIQARILGAN gullar,
-          soni majburiy. Sklad emas! (12.09.2026 tuzatish: ilgari skladdan chiqib turardi.) */}
-      {floristBoxMode && !compLocked && (
-        <div className="mb-2 flex items-start gap-1.5 rounded-[11px] px-3 py-2 text-[12px] font-semibold" style={{ background: "var(--primary-soft, var(--surface-2))", color: "var(--text-2)" }}>
-          <Info size={13} strokeWidth={2.2} className="mt-px shrink-0" style={{ color: "var(--primary)" }} />
-          <span>
-            Quti katalogi — gul <b>floristga chiqarilgan guldan</b> tanlanadi (skladdan emas).
-            Har bir gulning <b>soni majburiy</b>, florist haqi esa <b>qo&apos;lda</b> kiritiladi.
-          </span>
-        </div>
-      )}
       {kind === "custom" && floristMode && !compLocked && (
         <div className="mb-2 flex items-start gap-1.5 rounded-[11px] px-3 py-2 text-[12px] font-semibold" style={{ background: "var(--primary-soft, var(--surface-2))", color: "var(--text-2)" }}>
           <Info size={13} strokeWidth={2.2} className="mt-px shrink-0" style={{ color: "var(--primary)" }} />
@@ -931,24 +837,13 @@ export default function KatalogModal({ item = null, onClose, onSaved }: { item?:
       )}
       {compLocked ? (
         <div className="rounded-[13px] bg-mint px-3.5 py-2.5 text-[12.5px] font-semibold text-mintink">✓ Sotuv boshlangan — tarkib o&apos;zgartirilmaydi.</div>
-      ) : floristBoxMode && floristBalances === null ? (
-        <div className="py-4 text-center text-[12.5px]" style={{ color: "var(--muted)" }}>Floristning gullari yuklanmoqda…</div>
-      ) : floristBoxMode && (floristBalances ?? []).length === 0 ? (
-        // FLORIST HECH NARSA TUTMAYDI — quti undan yasalmaydi; chiqarish sahifasiga yo'l (FloristCompositionPicker bilan bir xil)
-        <div className="rounded-[14px] border border-dashed p-4 text-center" style={{ borderColor: "var(--border)" }}>
-          <p className="text-[13px] font-semibold">Bu floristga hali gul chiqarilmagan</p>
-          <p className="mt-1 text-[12px]" style={{ color: "var(--muted)" }}>Quti florist qo&apos;lidagi guldan yasaladi — avval unga skladdan gul chiqaring.</p>
-          <button type="button" onClick={() => { if (typeof window !== "undefined") window.location.assign(`/floristlarga-chiqarilgan?florist=${florist}`); }} className="btn-primary mt-3 !inline-flex">Floristga gul chiqarish</button>
-        </div>
       ) : (
         <div className="flex flex-col gap-2.5">
           {comp.map((r, i) => {
             const b = batchOf(r.stock_batch);
             const st = stemsOfRow(r);
             const avail = availOf(r.stock_batch);
-            // ⚠️ QUTI+florist: tanlangan gul floristda YO'Q (florist almashgan bo'lsa) — aniq belgilanadi
-            const notHeld = floristBoxMode && r.stock_batch > 0 && !heldByFlorist.has(r.stock_batch);
-            // validatsiya SHU partiyaga tegishli BARCHA qatorlar yig'indisi bo'yicha (sklad yoki florist qoldig'i)
+            // validatsiya SHU partiyaga tegishli BARCHA qatorlar yig'indisi bo'yicha (sklad qoldig'i)
             const over = r.stock_batch > 0 ? stemsForBatchNow(r.stock_batch) > avail : false;
             const under = b ? st > 0 && st < b.minimum_sale_stems : false;
             const sub = b ? Math.round(+(b.sale_price_per_stem ?? 0)) * st : 0;
@@ -960,7 +855,7 @@ export default function KatalogModal({ item = null, onClose, onSaved }: { item?:
                 key={i}
                 className="rounded-[13px] border p-2.5 transition-colors duration-300"
                 style={{
-                  borderColor: offending || notHeld ? "var(--danger-ink)" : over || under ? "color-mix(in srgb, #b3873a 45%, var(--border))" : "var(--border)",
+                  borderColor: offending ? "var(--danger-ink)" : over || under ? "color-mix(in srgb, #b3873a 45%, var(--border))" : "var(--border)",
                   background: flashing ? "color-mix(in srgb, var(--primary) 12%, transparent)" : offending ? "var(--danger-soft, rgba(160,74,74,.10))" : undefined,
                   boxShadow: flashing ? "inset 0 0 0 1.5px var(--primary)" : undefined,
                 }}
@@ -979,17 +874,15 @@ export default function KatalogModal({ item = null, onClose, onSaved }: { item?:
                   <button type="button" onClick={() => setComp(comp.length > 1 ? comp.filter((_, j) => j !== i) : comp)} className="icon-btn icon-btn-danger !h-8 !w-8 shrink-0" title="Olib tashlash"><X size={15} strokeWidth={1.75} /></button>
                 </div>
                 <div className="mt-1 flex items-center justify-between text-[11.5px]">
-                  <span style={{ color: notHeld ? "var(--danger-ink)" : over || under ? "#b3873a" : "var(--muted)" }}>
+                  <span style={{ color: over || under ? "#b3873a" : "var(--muted)" }}>
                     {r.mode === "bunches" && r.stock_batch > 0 ? `${r.qty || 0} × ${spb} = ${st} dona · ` : ""}
-                    {notHeld
-                      ? "Bu florist bu gulni tutmaydi — boshqasini tanlang"
-                      : over
-                        ? `${floristBoxMode ? "Floristdagi qoldiqdan" : "Qoldiqdan"} ko'p (${formatStemsAndBunches(avail, spb)})`
-                        : under
-                          ? `Min. ${b?.minimum_sale_stems} dona`
-                          : r.stock_batch > 0
-                            ? `${formatStemsAndBunches(avail, spb)} ${floristBoxMode ? "floristda" : "bor"}`
-                            : ""}
+                    {over
+                      ? `Qoldiqdan ko'p (${formatStemsAndBunches(avail, spb)})`
+                      : under
+                        ? `Min. ${b?.minimum_sale_stems} dona`
+                        : r.stock_batch > 0
+                          ? `${formatStemsAndBunches(avail, spb)} bor`
+                          : ""}
                   </span>
                   {sub > 0 && <span className="font-semibold" style={{ color: "var(--acc)" }}>{fmt(sub)}</span>}
                 </div>
@@ -1105,8 +998,8 @@ export default function KatalogModal({ item = null, onClose, onSaved }: { item?:
         {/* ⚠️ §3 FLORIST HAQI — STANDART: faqat KO'RSATILADI (hajm tarifidan; backend qo'lda kiritilganni
             qabul qilmaydi). CUSTOM: tahrirlanadi (ish hajmi oldindan noma'lum, operator kiritadi). */}
         {(kind === "custom" || florist > 0) && !isApprentice && (
-          <Field label={boxMode ? "Florist ish haqi (qo'lda, majburiy)" : kind === "custom" ? "Florist ish haqi (oylikka)" : "Florist ish haqi (tarifdan)"}>
-            {kind === "custom" || boxMode ? (
+          <Field label={kind === "custom" ? "Florist ish haqi (oylikka)" : "Florist ish haqi (tarifdan)"}>
+            {kind === "custom" ? (
               <input
                 className="inp"
                 type="number"
@@ -1128,9 +1021,6 @@ export default function KatalogModal({ item = null, onClose, onSaved }: { item?:
             <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] font-semibold">
               {!florist ? (
                 <span style={{ color: "var(--muted)" }}>Florist tanlanmagan — oylik yozilmaydi</span>
-              ) : boxMode ? (
-                /* ⚠️ QUTI — S/M/L tarifi YO'Q, summa har safar qo'lda yoziladi (backend shuni oladi). */
-                <span style={{ color: "var(--text-2)" }}>Quti — summa <b>qo&apos;lda</b> kiritiladi, hajm tarifi qo&apos;llanilmaydi.</span>
               ) : !volume ? (
                 <span style={{ color: "var(--muted)" }}>Hajmni tanlang — tarifdan olinadi</span>
               ) : !currentRate ? (
@@ -1161,12 +1051,7 @@ export default function KatalogModal({ item = null, onClose, onSaved }: { item?:
               )}
             </div>
             {/* ⚠️ §8 — CUSTOM'da summa BO'SH qoldirilsa backend hajm tarifidan oladi (yozilgan bo'lsa AYNAN shu ketadi). */}
-            {boxMode && florist > 0 && !(+f.florist_salary_amount > 0) && (
-              <span className="mt-0.5 block text-[11.5px] font-semibold" style={{ color: "var(--warning-ink, #8a6d1f)" }}>
-                Quti uchun bu summa <b>majburiy</b> — bo&apos;sh qoldirilsa katalog saqlanmaydi.
-              </span>
-            )}
-            {!boxMode && kind === "custom" && florist > 0 && f.florist_salary_amount === "" && (
+            {kind === "custom" && florist > 0 && f.florist_salary_amount === "" && (
               <span className="mt-0.5 block text-[11.5px] font-semibold" style={{ color: "var(--muted)" }}>
                 Bo&apos;sh qoldirilsa — server <b>hajm tarifidan</b> oladi (tarif bo&apos;lmasa oylik yozilmaydi).
               </span>

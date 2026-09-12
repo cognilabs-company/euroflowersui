@@ -1,3 +1,5 @@
+> ⚠️ ESKIRGAN (12.09.2026): quti endi buket/savat kabi ishlaydi — hajm majburiy, haq va gul soni quti hajm tarifidan. Amaldagi hujjat: `euroflowers_box_catalog_auto_distribution_frontend.md`.
+
 # EuroFlowers Frontend Update: Oddiy katalogda Quti
 
 Sana: 2026-09-10

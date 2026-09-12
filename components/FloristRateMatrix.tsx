@@ -29,8 +29,10 @@ const digits = (s: string) => s.replace(/\D/g, "");
 const grouped = (raw: string) => (raw ? Number(raw).toLocaleString("ru") : "");
 
 /**
- * PER-FLORIST hajm tariflari matritsasi (Buket/Savat × Kichik/O'rta/Katta).
- * ⚠️ TO'LIQ ALMASHTIRISH: saqlashda barcha 6 katak birga `PATCH /florists/{id}/`
+ * PER-FLORIST hajm tariflari matritsasi (Buket/Savat/Quti × Kichik/O'rta/Katta).
+ * ⚠️ QUTI qatori 12.09.2026 dan — standart quti katalogi haqi va gul soni (default_stems)
+ *    shu tarifdan olinadi; tarifsiz quti katalogi saqlanmaydi (backend `volume` 400).
+ * ⚠️ TO'LIQ ALMASHTIRISH: saqlashda barcha 9 katak birga `PATCH /florists/{id}/`
  * `volume_rates` sifatida ketadi — ro'yxatda bo'lmagan katak nofaol bo'ladi. Shu bois
  * grid OCHILGANDA doim YANGI GET qilinadi (eskirgan grid begunoh tariflarni o'chirmasin).
  */
@@ -154,7 +156,7 @@ export default function FloristRateMatrix({ florist, onSaved }: { florist: Flori
         </div>
       )}
 
-      {/* 2×3 grid: qator=turi, ustun=hajm */}
+      {/* 3×3 grid: qator=turi (buket/savat/quti), ustun=hajm */}
       <div className="overflow-x-auto thin-scroll">
         <div className="grid min-w-[440px] gap-2" style={{ gridTemplateColumns: "72px repeat(3, 1fr)" }}>
           <div />
