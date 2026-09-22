@@ -1836,6 +1836,38 @@ export type CloseIssueResult = {
 /** batch MAJBURIY (har gul alohida yopiladi). return_stems ixtiyoriy (sukut 0). */
 export type CloseIssueInput = { florist: number; batch: number; return_stems?: number };
 
+/* ===== HAMMASINI YOPISH (close-all-issues) — bitta floristning BARCHA partiyalari bitta so'rovda.
+   Katalogga ulanmagan partiya ham bloklanmaydi: backend floristning mavjud kataloglariga o'zi qo'shadi. */
+/** absorb_remainder — sukut true: teng bo'linmagan qoldiq kataloglardan biriga qo'shiladi. */
+export type CloseAllIssuesInput = { florist: number; absorb_remainder?: boolean };
+/** close-issue item + added_per_item — shu yopishda har donaga QO'SHILGAN gul (backend tasdiqladi) */
+export type CloseAllIssuesItem = CloseIssuePreviewItem & { added_per_item: number };
+export type CloseAllIssuesBatch = {
+  /** ⚠️ bu YERDA ham florist = ism (string) */
+  florist: string;
+  batch_number: string;
+  /** taqsimot og'irligi. Hajm tarifi yo'q bo'lsa BLOKLAMAYDI: avval florist_fee, bo'lmasa equal. */
+  weight_source?: "default_stems" | "partial_default_stems" | "florist_fee" | "equal" | "apprentice_equal" | string;
+  /** append_to_catalog — partiya katalogga ulanmagan edi, backend mavjud kataloglarga composition QO'SHDI */
+  distribution_mode?: "open_rows" | "append_to_catalog" | string;
+  shared_stems: number;
+  /** floristning balansida QOLADI */
+  unplaced_stems: number;
+  items: CloseAllIssuesItem[];
+};
+export type CloseAllIssuesResult = {
+  florist: string;
+  closed_batches: number;
+  /** REAL yopilgan gul soni */
+  shared_stems: number;
+  /** bo'linmay qolgan REAL qoldiq — kataloglardan biriga qo'shildi */
+  absorbed_remainder: number;
+  /** TEXNIK farq: katalog dona soniga moslash uchun ortiqcha yozilgan (real gul emas) */
+  rounded_extra_stems: number;
+  unplaced_stems: number;
+  batches: CloseAllIssuesBatch[];
+};
+
 /** Florist oylik yozuvi (backend: /api/florist-salary/) */
 /** ⚠️ `rework` — restavratsiya (spec). Backend enum'ida HALI YO'Q (deploy kutilmoqda). */
 /** ⚠️ `extra_decoration` — QO'LDA yoziladigan oformleniya (FRONTEND_FLORIST_DECORATION_SALARY_API.md).

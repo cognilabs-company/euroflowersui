@@ -14,6 +14,7 @@ import FloristStockReturnDrawer from "@/components/FloristStockReturnDrawer";
 import FloristStockIssueModal from "@/components/FloristStockIssueModal";
 import FloristStockAdjustModal from "@/components/FloristStockAdjustModal";
 import FloristCloseIssueModal from "@/components/FloristCloseIssueModal";
+import FloristCloseAllModal from "@/components/FloristCloseAllModal";
 import FloristIssueRowMenu from "@/components/FloristIssueRowMenu";
 import { fmt, fmtDate, fmtTime } from "@/lib/format";
 import { formatStemsAndBunches, stems as stemsFmt } from "@/lib/inventory";
@@ -60,6 +61,8 @@ export default function FloristStockIssuePage() {
   const [adjust, setAdjust] = useState<{ florist: number; name: string; scoped: FloristStockBalance | null; total: number } | null>(null);
   // CHIQIMNI YOPISH modali (birinchi taqsimot) — bitta balans (florist+partiya) uchun
   const [closeTarget, setCloseTarget] = useState<{ balance: FloristStockBalance; staffType?: StaffType } | null>(null);
+  // HAMMASINI YOPISH — bitta floristning barcha partiyalari bitta so'rovda (close-all-issues)
+  const [closeAll, setCloseAll] = useState<{ florist: number; name: string; rows: FloristStockBalance[] } | null>(null);
 
   // URL o'qish: ?tab= va ?florist= (deep link modalni prefill bilan OCHADI)
   useEffect(() => {
@@ -239,12 +242,19 @@ export default function FloristStockIssuePage() {
                   {!isFlorist && (
                     <div className="mb-2 flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2 text-[13px] font-bold" style={{ color: "var(--primary)" }}>{g.name}{groupStaff && <span className="rounded-full px-2 py-0.5 text-[10.5px] font-bold" style={{ background: groupStaff.staff_type === "apprentice" ? "var(--primary-soft)" : "var(--surface-2)", color: groupStaff.staff_type === "apprentice" ? "var(--primary)" : "var(--muted)" }}>{groupStaff.staff_type === "apprentice" ? "Shogird" : "Florist"}</span>}</div>
-                      {/* PER-FLORIST: hamma partiya qoldig'i katalogga bo'linadi (faqat to_catalog) */}
                       {canManage && groupTotal > 0 && (
-                        <button onClick={() => setAdjust({ florist: fid, name: g.name, scoped: null, total: groupTotal })}
-                          className="flex items-center gap-1.5 rounded-[11px] border px-2.5 py-1 text-[12px] font-bold transition-colors hover:bg-[var(--hover)]" style={{ borderColor: "var(--border)", color: "var(--text-2)" }}>
-                          <Scale size={13} strokeWidth={2.2} /> Hisobni to&apos;g&apos;rilash
-                        </button>
+                        <div className="flex flex-wrap items-center justify-end gap-2">
+                          {/* PER-FLORIST YOPISH: hamma chiqarilgan partiya bitta so'rovda kataloglarga bo'linadi */}
+                          <button onClick={() => setCloseAll({ florist: fid, name: g.name, rows: g.rows })}
+                            className="flex items-center gap-1.5 rounded-[11px] px-2.5 py-1 text-[12px] font-bold transition-opacity hover:opacity-85" style={{ background: "var(--primary-soft)", color: "var(--primary)" }}>
+                            <PackageCheck size={13} strokeWidth={2.2} /> Hamma chiqarilgan gullarni yopish
+                          </button>
+                          {/* PER-FLORIST: hamma partiya qoldig'i katalogga bo'linadi (faqat to_catalog) */}
+                          <button onClick={() => setAdjust({ florist: fid, name: g.name, scoped: null, total: groupTotal })}
+                            className="flex items-center gap-1.5 rounded-[11px] border px-2.5 py-1 text-[12px] font-bold transition-colors hover:bg-[var(--hover)]" style={{ borderColor: "var(--border)", color: "var(--text-2)" }}>
+                            <Scale size={13} strokeWidth={2.2} /> Hisobni to&apos;g&apos;rilash
+                          </button>
+                        </div>
                       )}
                     </div>
                   )}
@@ -352,6 +362,9 @@ export default function FloristStockIssuePage() {
       )}
       {closeTarget && (
         <FloristCloseIssueModal balance={closeTarget.balance} staffType={closeTarget.staffType} onClose={() => setCloseTarget(null)} onDone={onStockChange} />
+      )}
+      {closeAll && (
+        <FloristCloseAllModal florist={closeAll.florist} floristName={closeAll.name} balances={closeAll.rows} onClose={() => setCloseAll(null)} onDone={onStockChange} />
       )}
     </div>
   );

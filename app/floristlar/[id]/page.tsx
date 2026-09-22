@@ -2,8 +2,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowLeft, Download, TrendingUp, TrendingDown, PackagePlus, RotateCcw, Trash2, Info, Wallet } from "lucide-react";
+import { ArrowLeft, Download, TrendingUp, TrendingDown, PackageCheck, PackagePlus, RotateCcw, Trash2, Info, Wallet } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
+import { notifyReportDataChanged } from "@/lib/reportCache";
 import { useStore, usePerm } from "@/lib/store";
 import { fmt, fmtDate, fmtTime, dateAfterParam, initials } from "@/lib/format";
 import { STAFF_LABEL, formatStemsAndBunches, volumeLabel } from "@/lib/inventory";
@@ -14,6 +15,7 @@ import FloristDecorationBlock from "@/components/FloristDecorationBlock";
 import FloristModal from "@/components/FloristModal";
 import FloristStockIssueModal from "@/components/FloristStockIssueModal";
 import FloristStockReturnDrawer from "@/components/FloristStockReturnDrawer";
+import FloristCloseAllModal from "@/components/FloristCloseAllModal";
 import StockLine, { lineFromBatchDetail } from "@/components/StockLine";
 import EmptyState from "@/components/EmptyState";
 import FlowerLoader from "@/components/FlowerLoader";
@@ -111,6 +113,8 @@ export default function FloristDetailPage() {
     api.floristPayments({ florist: fid, ordering: "-paid_at", page_size: 100 }).then(setPayments).catch(() => setPayments([]));
   }, []);
   const [returnTarget, setReturnTarget] = useState<{ balance: FloristStockBalance; kind: "return" | "waste" } | null>(null);
+  // HAMMA CHIQARILGAN GULLARNI YOPISH (close-all-issues) — shu floristning barcha partiyalari
+  const [closeAllOpen, setCloseAllOpen] = useState(false);
 
   const from = dateRange ? dateRange.from : dateAfterParam(dateFilter);
   const to = dateRange ? dateRange.to : ymd(new Date());
@@ -397,9 +401,16 @@ export default function FloristDetailPage() {
 
             {/* h) QO'LIDAGI GULLAR */}
             <Section id="held" title="Qo'lidagi gullar" right={canManage ? (
-              <button onClick={() => setIssueOpen(true)} className="flex items-center gap-1.5 rounded-[11px] px-3 py-1.5 text-[12px] font-bold text-white transition-opacity hover:opacity-90" style={{ background: "var(--primary)" }}>
-                <PackagePlus size={14} strokeWidth={2.2} /> Skladdan chiqarish
-              </button>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {heldTotal > 0 && (
+                  <button onClick={() => setCloseAllOpen(true)} className="flex items-center gap-1.5 rounded-[11px] px-3 py-1.5 text-[12px] font-bold transition-opacity hover:opacity-85" style={{ background: "var(--primary-soft)", color: "var(--primary)" }}>
+                    <PackageCheck size={14} strokeWidth={2.2} /> Hamma chiqarilgan gullarni yopish
+                  </button>
+                )}
+                <button onClick={() => setIssueOpen(true)} className="flex items-center gap-1.5 rounded-[11px] px-3 py-1.5 text-[12px] font-bold text-white transition-opacity hover:opacity-90" style={{ background: "var(--primary)" }}>
+                  <PackagePlus size={14} strokeWidth={2.2} /> Skladdan chiqarish
+                </button>
+              </div>
             ) : undefined}>
               {balances === null ? <p className="py-3 text-center text-[12.5px]" style={{ color: "var(--muted)" }}>Yuklanmoqda…</p>
                 : balances.filter((b) => b.remaining_stems > 0).length === 0 ? <EmptyState title="Hozircha gul yo'q" sub="Bu floristda hozir gul qoldig'i yo'q — «Skladdan chiqarish» orqali chiqaring." />
@@ -426,7 +437,7 @@ export default function FloristDetailPage() {
                       })}
                     </div>
                     <p className="mt-2.5 flex items-center gap-1.5 text-[11.5px]" style={{ color: "var(--muted)" }}>
-                      <Info size={12} strokeWidth={2.2} /> Chiqim yopish va to&apos;g&apos;rilash <Link href="/floristlarga-chiqarilgan" className="font-bold" style={{ color: "var(--primary)" }}>Floristlarga chiqarilgan</Link> sahifasida.
+                      <Info size={12} strokeWidth={2.2} /> Partiyalab yopish va to&apos;g&apos;rilash <Link href="/floristlarga-chiqarilgan" className="font-bold" style={{ color: "var(--primary)" }}>Floristlarga chiqarilgan</Link> sahifasida.
                     </p>
                   </>
                 )}
@@ -440,6 +451,10 @@ export default function FloristDetailPage() {
       )}
       {returnTarget && (
         <FloristStockReturnDrawer balance={returnTarget.balance} initialKind={returnTarget.kind} onClose={() => setReturnTarget(null)} onDone={() => { loadBalances(); loadStats(); loadBatches(); }} />
+      )}
+      {/* yopish katalog tarkibi/tannarxini yozadi → hisobot keshi + balans + statistika (kataloglar) */}
+      {closeAllOpen && balances && (
+        <FloristCloseAllModal florist={id} floristName={name} balances={balances} onClose={() => setCloseAllOpen(false)} onDone={() => { notifyReportDataChanged(); loadBalances(); loadStats(); }} />
       )}
       {/* ⚠️ OFORMLENIYA NARXI — YAGONA input shu formada (takrorlanmaydi) */}
       {editFee && florist && (

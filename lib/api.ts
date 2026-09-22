@@ -3,7 +3,7 @@ import { customReturnPayload, type CustomReturnResponse } from "./customReturn";
 import { wastePayload, type WasteForm } from "./catalogWaste";
 import type {
   Accounting, AdjustDirection, AdjustInput, AdjustPreview, AdjustResult, AICatalogInput, AICatalogItem,
-  CloseIssuePreview, CloseIssueInput, CloseIssueResult,
+  CloseIssuePreview, CloseIssueInput, CloseIssueResult, CloseAllIssuesInput, CloseAllIssuesResult,
   AISettings, Analytics, AuditLog, BatchUsage, Branch, BranchReport, BusinessSettings, CatalogItem, CatalogTransfer, CatalogTransferInput, Conversation, Customer, Dashboard, Debt, DebtByCustomer,
   Expense, ExpenseOptions, ExpenseSummary, Flower, FloristAttendance, FloristInput, FloristProfile, FloristSalaryEntry, FloristStockBalance, FloristStockIssue, FloristStockIssueInput, FloristStockReturnInput, FloristVolumeRate, FlowerVariant,
   InstagramEvent, InstagramSettings, IntegrationSettings, Lead, LeadInput,
@@ -909,6 +909,12 @@ export const api = {
       Faqat foydalanuvchi tasdig'idan keyin. adjust'dan OLDINGI birinchi taqsimot. */
   closeIssue: (data: CloseIssueInput) =>
     request<CloseIssueResult>("/api/florist-stock-balances/close-issue/", { method: "POST", body: JSON.stringify(data) }),
+  /** ⚠️ HAMMASINI YOPISH — POST: floristning BARCHA chiqarilgan qoldig'i bitta so'rovda kataloglarga
+      taqsimlanadi (skladga qaytarish YO'Q). Preview yo'q — faqat tasdiqdan keyin.
+      ATOMAR: bitta partiyada xato bo'lsa hammasi rollback. Katalog yo'q yoki yopiladigan qoldiq
+      qolmagan bo'lsa 400. Eski close-issue + close_all:true ham ishlaydi, lekin shu endpoint tavsiya qilingan. */
+  closeAllIssues: (data: CloseAllIssuesInput) =>
+    request<CloseAllIssuesResult>("/api/florist-stock-balances/close-all-issues/", { method: "POST", body: JSON.stringify(data) }),
 
   /** Joriy foydalanuvchining florist profili (o'z hisoboti uchun). Florist bo'lmasa 404. */
   floristMe: () => request<FloristProfile>("/api/florists/me/"),
