@@ -14,6 +14,7 @@ import { api, ApiError } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import useVisiblePoll from "@/lib/useVisiblePoll";
 import { CHAT_PAGE_SIZE, chatCountLabel, chatListQuery, hasMoreConversations, mergeConversations } from "@/lib/chatList";
+import { CHAT_SEARCH_DEBOUNCE_MS, chatSearchHint, chatSearchTerm, shouldPollChatList } from "@/lib/chatSearch";
 import { fmtTime, initials } from "@/lib/format";
 import { CONV_STATUS_LABEL } from "@/components/badges";
 import { Icon } from "@/components/icons";
@@ -251,6 +252,12 @@ export default function ChatPage() {
   const [convTotal, setConvTotal] = useState(0);
   const [convMore, setConvMore] = useState(false);
   const [convMoreBusy, setConvMoreBusy] = useState(false);
+  /** ⚠️ Filtr/qidiruv o'zgarganda BUTUN sahifa loader'ga almashmaydi — ro'yxat
+      joyida qoladi, ustida ingichka «yangilanmoqda» holati ko'rinadi. */
+  const [listBusy, setListBusy] = useState(false);
+  const firstLoad = useRef(true);
+  /** ⚠️ Kech kelgan javob YANGISINI BOSMASIN: har so'rovga raqam, oxirgisi g'olib. */
+  const reqSeq = useRef(0);
   const convPage = useRef(1);
   const moreRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
@@ -294,10 +301,14 @@ export default function ChatPage() {
   const [pauseOpen, setPauseOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [search, setSearch] = useState("");
-  /** ⚠️ Qidiruv SERVERDA — har harfda so'rov ketmasin deb 350 ms kechiktiriladi. */
+  /**
+   * ⚠️ QIDIRUV SERVERDA va U QIMMAT — bitta so'rov ≈ 1 MB / 3–6 s (o'lchov va
+   *    sabab: lib/chatSearch). Shuning uchun so'rov FAQAT yozish to'xtagach,
+   *    700 ms dan keyin va kamida 2 harfdan boshlab ketadi.
+   */
   const [debSearch, setDebSearch] = useState("");
   useEffect(() => {
-    const t = setTimeout(() => setDebSearch(search.trim()), 350);
+    const t = setTimeout(() => setDebSearch(chatSearchTerm(search)), CHAT_SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(t);
   }, [search]);
   const [statusF, setStatusF] = useState(""); // suhbat holati — server filtri
@@ -339,8 +350,15 @@ export default function ChatPage() {
   const loadPage = useCallback(async (mode: "first" | "more" | "poll") => {
     const page = mode === "more" ? convPage.current + 1 : 1;
     if (mode === "more") setConvMoreBusy(true);
+    // ⚠️ Raqam FAQAT "first" uchun — qidiruv/filtr javoblari bir-birini bosmasin.
+    //    "more"/"poll" natijalari ro'yxatga QO'SHILADI, ular poyga yaratmaydi.
+    const seq = mode === "first" ? ++reqSeq.current : reqSeq.current;
+    const stale = () => mode === "first" && seq !== reqSeq.current;
     try {
       const d = await api.conversationsPage(chatListQuery({ status: statusF || undefined, search: debSearch, page }));
+      // ⚠️ Bu javob eskirgan (orqasidan yangi qidiruv ketgan) — natija TASHLANADI,
+      //    aks holda sekin kelgan «az» javobi «aziza» ro'yxatini bosib ketardi.
+      if (stale()) return;
       const rows = d.results ?? [];
       setConvTotal(Number(d.count ?? 0));
       if (mode === "first") {
@@ -366,9 +384,13 @@ export default function ChatPage() {
       }
       if (deepConv) setDeepMissing(!rows.some((c) => c.id === deepConv));
     } catch (e) {
-      showToast(e instanceof Error ? e.message : "Suhbatlarni yuklab bo'lmadi");
+      if (!stale()) showToast(e instanceof Error ? e.message : "Suhbatlarni yuklab bo'lmadi");
     } finally {
-      setLoading(false);
+      if (!stale()) {
+        setLoading(false);
+        setListBusy(false);
+        firstLoad.current = false;
+      }
       if (mode === "more") setConvMoreBusy(false);
     }
   }, [showToast, statusF, debSearch, deepConv]);
@@ -398,9 +420,15 @@ export default function ChatPage() {
   }, []);
 
   // ⚠️ filtr/qidiruv o'zgarsa ro'yxat BOSHIDAN — sahifa hisobi ham nolga qaytadi
-  useEffect(() => { setLoading(true); loadPage("first"); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [statusF, debSearch]);
-  // ⚠️ Ro'yxat — 30 s, FAQAT varaq ko'rinib turganda (ilgari 15 s va fonda ham ishlardi)
-  useVisiblePoll(() => loadPage("poll"), 30_000, true);
+  useEffect(() => {
+    // ⚠️ FAQAT birinchi yuklash butun sahifa loader'ini ko'rsatadi. Qidiruv/filtr
+    //    o'zgarganda ro'yxat JOYIDA qoladi (ilgari har qidiruvda varaq «sakrardi»).
+    if (firstLoad.current) setLoading(true); else setListBusy(true);
+    loadPage("first"); /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [statusF, debSearch]);
+  // ⚠️ Ro'yxat — 30 s, FAQAT varaq ko'rinib turganda (ilgari 15 s va fonda ham ishlardi).
+  //    ⚠️ Qidiruv faol bo'lsa TO'XTAYDI — o'sha 1 MB lik so'rov fonda takrorlanmaydi.
+  useVisiblePoll(() => loadPage("poll"), 30_000, shouldPollChatList(search, debSearch));
 
   // ro'yxat oxiri ko'rinsa — keyingi sahifa (IntersectionObserver)
   useEffect(() => {
@@ -572,6 +600,9 @@ export default function ChatPage() {
     );
   };
 
+  /** Qidiruv maydoni ostidagi holat satri (bo'sh — izoh kerak emas). */
+  const searchHint = chatSearchHint(search, debSearch, listBusy);
+
   if (loading) return <FlowerLoader />;
 
   return (
@@ -597,6 +628,14 @@ export default function ChatPage() {
           />
           <ClearFilters show={!!(search || statusF || chanF)} onClear={() => { setSearch(""); setStatusF(""); setChanF(""); }} />
         </div>
+        {/* ⚠️ QIDIRUV HOLATI — so'rov yozish to'xtagach ketadi; operator «ishlamayapti»
+            deb o'ylab qayta-qayta yozmasin uchun holat AYTIB turiladi. */}
+        {searchHint && (
+          <div className="-mt-1.5 flex items-center gap-1.5 px-1 text-[11.5px] font-semibold" style={{ color: "var(--muted)" }}>
+            {listBusy && <Loader2 size={12} className="animate-spin" />}
+            {searchHint}
+          </div>
+        )}
         {/* platforma filtri — Instagram gradienti / Telegram ko'ki bilan segment */}
         <div className="bg-sfc flex items-center rounded-full border p-1" style={{ borderColor: "var(--border)" }} role="tablist" aria-label="Platforma filtri">
           {([
@@ -622,7 +661,11 @@ export default function ChatPage() {
             );
           })}
         </div>
-        <div data-lenis-prevent className="glass flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overscroll-contain !rounded-[16px] p-2">
+        <div
+          data-lenis-prevent
+          className="glass flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overscroll-contain !rounded-[16px] p-2 transition-opacity duration-200"
+          style={{ opacity: listBusy ? 0.55 : 1 }}
+        >
           {fConvs.map((c) => (
             <button
               key={c.id}
